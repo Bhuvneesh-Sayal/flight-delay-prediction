@@ -102,11 +102,13 @@ def _run(steps: list) -> None:
         from src.data.ingestion import run_ingestion
         bts_csv_files, noaa_paths = run_ingestion()
 
+    # If ingest was skipped but prep is requested, discover files already on disk
+    if "prep" in steps and bts_csv_files is None:
+        from src.data.ingestion import _discover_cached
+        bts_csv_files, noaa_paths = _discover_cached()
+
     # ── Step 2: Preprocess ─────────────────────────────────────────────────
     if "prep" in steps:
-        if bts_csv_files is None or noaa_paths is None:
-            logger.error("'prep' requires 'ingest' to have run first.")
-            sys.exit(1)
         _banner("STEP 2 — Preprocessing")
         from src.data.preprocessing import run_preprocessing
         flights_df, weather_parquet_path = run_preprocessing(

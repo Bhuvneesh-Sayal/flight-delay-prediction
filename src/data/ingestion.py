@@ -232,6 +232,39 @@ def save_manifest(paths: dict = PATHS) -> None:
 # Convenience: run everything
 # ---------------------------------------------------------------------------
 
+def _discover_cached(
+    year: int = YEAR,
+    paths: dict = PATHS,
+    airport_stations: dict = AIRPORT_STATIONS,
+) -> tuple:
+    """
+    Discover already-downloaded BTS CSVs and NOAA PSVs on disk.
+    Used when `--steps prep` is run without `--steps ingest` in the same session.
+    Raises FileNotFoundError if any expected file is missing.
+    """
+    bts_csv_files = []
+    for month in range(1, 13):
+        csv_path = paths["bts_raw"] / f"bts_{year}_{month:02d}.csv"
+        if not csv_path.exists():
+            raise FileNotFoundError(
+                f"BTS CSV not found: {csv_path}. Run --steps ingest first."
+            )
+        bts_csv_files.append(str(csv_path))
+
+    noaa_paths_map = {}
+    for airport, station_id in airport_stations.items():
+        psv_path = paths["noaa_raw"] / f"GHCNh_{station_id}_{year}.psv"
+        if not psv_path.exists():
+            raise FileNotFoundError(
+                f"NOAA PSV not found: {psv_path}. Run --steps ingest first."
+            )
+        noaa_paths_map[airport] = psv_path
+
+    logger.info("Discovered %d BTS CSVs and %d NOAA PSVs on disk.",
+                len(bts_csv_files), len(noaa_paths_map))
+    return bts_csv_files, noaa_paths_map
+
+
 def run_ingestion(
     year: int = YEAR,
     paths: dict = PATHS,
