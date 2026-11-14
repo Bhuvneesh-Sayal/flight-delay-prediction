@@ -31,7 +31,7 @@ ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
 # PySpark and PyArrow are already provided by the bundled Spark distribution
 # on PYTHONPATH, so we skip them here to avoid version conflicts.
 COPY requirements.txt /tmp/requirements.txt
-RUN grep -ivE '^(pyspark|pyarrow)' /tmp/requirements.txt > /tmp/requirements_docker.txt && \
+RUN grep -ivE '^pyspark' /tmp/requirements.txt > /tmp/requirements_docker.txt && \
     pip install --no-cache-dir -r /tmp/requirements_docker.txt
 
 # ── PySpark from bundled Spark python dir ─────────────────────────────────

@@ -260,7 +260,10 @@ def _add_derived_features(flights) -> object:
         .withColumn("weather_available",   F.col("w_time_utc").isNotNull().cast("int"))
         .withColumn(
             "weather_age_minutes",
-            (F.col("t_minus_2_utc").cast("long") - F.col("w_time_utc").cast("long")) / 60.0,
+            F.coalesce(
+                (F.col("t_minus_2_utc").cast("long") - F.col("w_time_utc").cast("long")) / 60.0,
+                F.lit(0.0),   # no weather observation → age is unknown; 0 with weather_available=0
+            ),
         )
         .withColumn("weather_crosswind",   F.abs(F.col("w_wspeed") * F.sin(wind_diff)))
         .withColumn("weather_headwind",    F.col("w_wspeed") * F.cos(wind_diff))
