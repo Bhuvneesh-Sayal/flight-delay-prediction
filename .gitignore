@@ -43,3 +43,9 @@ results/
 .idea/
 .vscode/
 *.swp
+
+# Spark Docker infrastructure — binaries too large for git
+spark_docker/spark-3.5.1-bin-without-hadoop/
+spark_docker/app_source/
+spark_docker/volumes/
+spark_docker/*.tgz

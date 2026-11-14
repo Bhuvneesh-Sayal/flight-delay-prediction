@@ -1,0 +1,46 @@
+# =============================================================================
+# Dockerfile.spark — Corporate-network-friendly build
+# =============================================================================
+# Base images from MCR (Azure CDN, bypasses Zscaler/CloudFront blocks).
+# Spark copied from local extraction — no large downloads during build.
+# =============================================================================
+
+# Stage 1: Java 17 from MCR
+FROM mcr.microsoft.com/openjdk/jdk:17-ubuntu AS java-source
+
+# Stage 2: Python + Java + Spark
+FROM mcr.microsoft.com/devcontainers/python:3.11-bookworm
+
+# ── Zscaler CA cert (so pip/curl trust corporate HTTPS interception) ──────
+COPY zscaler-ca.crt /usr/local/share/ca-certificates/zscaler-ca.crt
+RUN update-ca-certificates
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+# ── Java 17 from MCR image ────────────────────────────────────────────────
+COPY --from=java-source /usr/lib/jvm /usr/lib/jvm
+ENV JAVA_HOME=/usr/lib/jvm/msopenjdk-17
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# ── Spark 3.5.1 (local copy — no download) ───────────────────────────────
+COPY spark-3.5.1-bin-without-hadoop /opt/spark
+ENV SPARK_HOME=/opt/spark
+ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
+
+# ── Python dependencies ──────────────────────────────────────────────────
+# PySpark and PyArrow are already provided by the bundled Spark distribution
+# on PYTHONPATH, so we skip them here to avoid version conflicts.
+COPY requirements.txt /tmp/requirements.txt
+RUN grep -ivE '^(pyspark|pyarrow)' /tmp/requirements.txt > /tmp/requirements_docker.txt && \
+    pip install --no-cache-dir -r /tmp/requirements_docker.txt
+
+# ── PySpark from bundled Spark python dir ─────────────────────────────────
+ENV PYTHONPATH="${SPARK_HOME}/python:${SPARK_HOME}/python/lib/py4j-0.10.9.7-src.zip:${PYTHONPATH}"
+ENV PYSPARK_PYTHON=python3
+ENV PYSPARK_DRIVER_PYTHON=python3
+
+# ── Project source ────────────────────────────────────────────────────────
+WORKDIR /app
+COPY app_source/ /app/
+
+EXPOSE 8080 8081 7077 4040
