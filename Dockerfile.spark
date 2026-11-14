@@ -1,0 +1,71 @@
+# =============================================================================
+# Dockerfile.spark
+# =============================================================================
+# Builds a self-contained image with:
+#   - OpenJDK 17 (Spark 3.5.x requirement)
+#   - Python 3.11
+#   - Apache Spark 3.5.1 (pre-built for Hadoop 3)
+#   - All project Python dependencies
+#
+# Used by every service in docker-compose.yml (master, workers, driver).
+# The same image plays every role; the COMMAND line determines the role.
+# =============================================================================
+
+FROM eclipse-temurin:17-jre-jammy
+
+# ---------------------------------------------------------------------------
+# System packages
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-dev \
+        python3-pip \
+        curl \
+        procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python
+
+# ---------------------------------------------------------------------------
+# Spark 3.5.1
+# ---------------------------------------------------------------------------
+ENV SPARK_VERSION=3.5.1
+ENV SPARK_HOME=/opt/spark
+ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
+
+RUN curl -fsSL \
+        "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz" \
+        -o /tmp/spark.tgz \
+    && tar -xzf /tmp/spark.tgz -C /opt \
+    && mv /opt/spark-${SPARK_VERSION}-bin-hadoop3 ${SPARK_HOME} \
+    && rm /tmp/spark.tgz
+
+# ---------------------------------------------------------------------------
+# Python dependencies
+# ---------------------------------------------------------------------------
+# Copy only requirements first so pip layer is cached unless deps change
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r /tmp/requirements.txt
+
+# ---------------------------------------------------------------------------
+# Project source
+# ---------------------------------------------------------------------------
+WORKDIR /app
+COPY . /app
+
+# Install the project package so src.* and config.* are importable
+RUN pip install --no-cache-dir -e .
+
+# ---------------------------------------------------------------------------
+# Spark environment
+# ---------------------------------------------------------------------------
+ENV PYSPARK_PYTHON=python3
+ENV PYSPARK_DRIVER_PYTHON=python3
+
+# Expose standard Spark ports
+# 8080  — Master Web UI
+# 8081  — Worker Web UI
+# 7077  — Cluster manager (master → workers)
+# 4040  — Spark application UI (driver)
+EXPOSE 8080 8081 7077 4040

@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data — large binary files should not be committed
+data/raw/
+data/interim/
+data/processed/
+data/features/
+/models/
+logs/
+benchmarks_output/
+results/
+
+# Keep directory placeholders
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/features/.gitkeep
+!/models/.gitkeep
+!logs/.gitkeep
+!benchmarks_output/.gitkeep
+!results/.gitkeep
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
