@@ -18,6 +18,22 @@ DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOG_FILE = PATHS["logs"] / "pipeline.log"
 
 
+class _SafeStreamHandler(logging.StreamHandler):
+    """
+    StreamHandler that silently swallows flush/write errors (e.g. TimeoutError
+    when stdout is backed by a slow network filesystem like OneDrive).
+    The file handler always gets the record regardless.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            self.stream.write(msg + self.terminator)
+            self.stream.flush()
+        except Exception:
+            pass  # never let a stdout flush error surface to the user
+
+
 def get_logger(name: str) -> logging.Logger:
     """
     Return a logger named *name* that writes to stdout and logs/pipeline.log.
@@ -35,7 +51,8 @@ def get_logger(name: str) -> logging.Logger:
 
     formatter = logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT)
 
-    stream_handler = logging.StreamHandler(sys.stdout)
+    # Use the safe handler so stdout flush timeouts don't print tracebacks
+    stream_handler = _SafeStreamHandler(sys.stdout)
     stream_handler.setLevel(logging.INFO)
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)

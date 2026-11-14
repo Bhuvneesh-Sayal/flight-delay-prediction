@@ -3,40 +3,23 @@ app/streamlit_app.py
 ====================
 Interactive Streamlit UI for real-time flight delay inference.
 
-Loads the saved two-stage hurdle model (departure task, bts_weather condition)
-and lets a user configure a flight, then returns:
-  - P(delayed > 0)        — from the hurdle classifier
-  - Expected delay (min)  — combined hurdle prediction
-
 Run with:
     streamlit run app/streamlit_app.py
-
-Requirements:
-    pip install streamlit
-    The hurdle model must have been saved by running:
-        python main.py --steps hurdle
 """
 
 import sys
+from datetime import date, time
 from pathlib import Path
-
-# ---------------------------------------------------------------------------
-# Make src/ and config/ importable when running from the app/ directory
-# ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config.settings import (
-    AIRPORT_RUNWAYS,
-    PATHS,
-    TOP_10_AIRPORTS,
-    WEATHER_FEATURE_COLS,
-)
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from config.settings import AIRPORT_RUNWAYS, PATHS, TOP_10_AIRPORTS
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -48,12 +31,41 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Model loading  (cached so it only loads once per session)
+# Weather presets — map human-readable conditions to sensor values
 # ---------------------------------------------------------------------------
+WEATHER_PRESETS = {
+    "☀️  Clear":        dict(temp=20.0,  dew=-5.0,  wind_speed=4.0,  wind_dir=180.0, visibility=9999.0, slp=1015.0),
+    "⛅  Partly Cloudy": dict(temp=15.0,  dew=5.0,   wind_speed=7.0,  wind_dir=200.0, visibility=9000.0, slp=1012.0),
+    "🌧️  Rainy":         dict(temp=10.0,  dew=8.0,   wind_speed=10.0, wind_dir=220.0, visibility=4000.0, slp=1005.0),
+    "⛈️  Stormy":        dict(temp=8.0,   dew=7.0,   wind_speed=18.0, wind_dir=250.0, visibility=1500.0, slp=995.0),
+    "🌫️  Foggy":         dict(temp=12.0,  dew=11.0,  wind_speed=3.0,  wind_dir=180.0, visibility=800.0,  slp=1010.0),
+    "❄️  Icy / Snow":    dict(temp=-3.0,  dew=-5.0,  wind_speed=8.0,  wind_dir=300.0, visibility=3000.0, slp=1020.0),
+}
 
+# Approximate average flights per 2-hour window by departure hour
+CONGESTION_BY_HOUR = {
+    0: 2,  1: 1,  2: 1,  3: 1,  4: 2,  5: 5,
+    6: 12, 7: 15, 8: 14, 9: 13, 10: 13, 11: 14,
+    12: 15, 13: 15, 14: 15, 15: 16, 16: 16, 17: 17,
+    18: 16, 19: 14, 20: 12, 21: 10, 22: 7,  23: 4,
+}
+
+AIRLINES = {
+    "AA — American Airlines": "AA",
+    "DL — Delta Air Lines":   "DL",
+    "UA — United Airlines":   "UA",
+    "WN — Southwest Airlines":"WN",
+    "B6 — JetBlue":           "B6",
+    "AS — Alaska Airlines":   "AS",
+    "NK — Spirit Airlines":   "NK",
+    "F9 — Frontier Airlines": "F9",
+}
+
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
 @st.cache_resource(show_spinner="Loading hurdle model…")
 def load_models():
-    """Load the departure hurdle classifier and regressor PipelineModels."""
     try:
         from pyspark.ml import PipelineModel
         from pyspark.sql import SparkSession
@@ -68,8 +80,8 @@ def load_models():
         )
         spark.sparkContext.setLogLevel("ERROR")
 
-        clf_path = PATHS["models"] / "departure_hurdle_classifier"
-        reg_path = PATHS["models"] / "departure_hurdle_regressor"
+        clf_path = PATHS["models"] / "hurdle_departure_classifier"
+        reg_path = PATHS["models"] / "hurdle_departure_regressor"
 
         if not clf_path.exists() or not reg_path.exists():
             return None, None, None
@@ -84,52 +96,32 @@ def load_models():
 
 
 # ---------------------------------------------------------------------------
-# Inference helper
+# Inference
 # ---------------------------------------------------------------------------
-
-def _build_input_row(
-    spark,
-    origin: str,
-    dest: str,
-    airline: str,
-    month: int,
-    day_of_week: int,
-    dep_hour: float,
-    elapsed_time: float,
-    congestion: int,
-    prior_delay: float,
-    temp: float,
-    dew: float,
-    wind_speed: float,
-    wind_dir: float,
-    visibility: float,
-    slp: float,
-) -> object:
-    """Construct a single-row Spark DataFrame matching the weather feature schema."""
-    from pyspark.sql import types as T
-
+def _build_input_row(spark, origin, dest, airline, flight_date, dep_time,
+                     elapsed_time, congestion, prior_delay, weather):
     rad = np.pi / 180.0
     runway_hdg = AIRPORT_RUNWAYS.get(origin, 180.0)
-    wind_diff = (wind_dir - runway_hdg) * rad
-    crosswind = abs(wind_speed * np.sin(wind_diff))
-    headwind  = wind_speed * np.cos(wind_diff)
-    icing     = 1.0 if (temp <= 0.0 and (temp - dew) <= 2.0) else 0.0
-    ifr       = 1.0 if visibility < 4800.0 else 0.0
+    wind_diff = (weather["wind_dir"] - runway_hdg) * rad
+    crosswind = abs(weather["wind_speed"] * np.sin(wind_diff))
+    headwind  = weather["wind_speed"] * np.cos(wind_diff)
+    icing     = 1.0 if (weather["temp"] <= 0.0 and (weather["temp"] - weather["dew"]) <= 2.0) else 0.0
+    ifr       = 1.0 if weather["visibility"] < 4800.0 else 0.0
 
     data = [{
         "Origin":                   origin,
         "Dest":                     dest,
         "Reporting_Airline":        airline,
-        "scheduled_month":          month,
-        "scheduled_day_of_week":    day_of_week,
-        "scheduled_departure_hour": dep_hour,
-        "CRSElapsedTime":           elapsed_time,
-        "origin_congestion_2h":     congestion,
-        "prior_leg_delay":          prior_delay,
-        "w_temp":                   temp,
-        "w_dew":                    dew,
-        "w_wspeed":                 wind_speed,
-        "w_slp":                    slp,
+        "scheduled_month":          flight_date.month,
+        "scheduled_day_of_week":    flight_date.isoweekday() % 7 + 1,  # Sun=1 .. Sat=7
+        "scheduled_departure_hour": float(dep_time.hour),
+        "CRSElapsedTime":           float(elapsed_time),
+        "origin_congestion_2h":     float(congestion),
+        "prior_leg_delay":          float(prior_delay),
+        "w_temp":                   weather["temp"],
+        "w_dew":                    weather["dew"],
+        "w_wspeed":                 weather["wind_speed"],
+        "w_slp":                    weather["slp"],
         "weather_crosswind":        crosswind,
         "weather_headwind":         headwind,
         "weather_icing_risk":       icing,
@@ -140,34 +132,24 @@ def _build_input_row(
     return spark.createDataFrame(pd.DataFrame(data))
 
 
-def _predict(spark, clf_model, reg_model, input_df) -> tuple:
-    """
-    Run the two-stage hurdle prediction.
-    Returns (p_delayed, expected_delay_minutes).
-    """
+def _predict(spark, clf_model, reg_model, input_df):
     from pyspark.sql import types as T
+    from pyspark.sql.functions import udf
 
-    get_prob1 = st.session_state.get("_get_prob1")
-    if get_prob1 is None:
-        from pyspark.sql.functions import udf
-        get_prob1 = udf(lambda v: float(v[1]), T.DoubleType())
-        st.session_state["_get_prob1"] = get_prob1
-
-    clf_out = clf_model.transform(input_df)
+    get_prob1 = udf(lambda v: float(v[1]), T.DoubleType())
+    clf_out   = clf_model.transform(input_df)
     p_delayed = float(clf_out.select(get_prob1("probability")).first()[0])
 
-    reg_out = reg_model.transform(input_df)
-    log_pred = float(reg_out.select("prediction").first()[0])
+    reg_out   = reg_model.transform(input_df)
+    log_pred  = float(reg_out.select("prediction").first()[0])
     cond_delay = float(np.expm1(max(log_pred, 0.0)))
 
-    expected_delay = p_delayed * cond_delay
-    return p_delayed, expected_delay
+    return p_delayed, p_delayed * cond_delay
 
 
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
-
 def main():
     st.title("✈️ Flight Delay Predictor")
     st.caption(
@@ -176,102 +158,113 @@ def main():
     )
 
     spark, clf_model, reg_model = load_models()
-
     if spark is None:
-        st.warning(
-            "⚠️ Models not found. Run `python main.py --steps hurdle` first to train and save them."
-        )
+        st.warning("⚠️ Models not found. Run `python main.py --steps hurdle` first.")
         st.stop()
 
-    # ── Flight details ───────────────────────────────────────────────────────
-    st.subheader("Flight Details")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        origin = st.selectbox("Origin Airport", TOP_10_AIRPORTS, index=0)
-    with col2:
-        dest_opts = [a for a in TOP_10_AIRPORTS if a != origin]
-        dest = st.selectbox("Destination Airport", dest_opts, index=1)
-    with col3:
-        airline = st.selectbox("Airline", ["AA", "DL", "UA", "WN", "B6", "AS", "NK", "F9"])
+    # ── Flight Details ───────────────────────────────────────────────────────
+    st.subheader("🛫 Flight Details")
 
-    col4, col5, col6 = st.columns(3)
-    with col4:
-        month = st.slider("Month", 1, 12, 6)
-    with col5:
-        day_of_week = st.slider("Day of Week (1=Sun, 7=Sat)", 1, 7, 2)
-    with col6:
-        dep_hour = st.slider("Scheduled Departure Hour", 0.0, 23.0, 8.0, step=0.5)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        origin = st.selectbox("Origin Airport", TOP_10_AIRPORTS)
+    with c2:
+        dest = st.selectbox("Destination Airport",
+                            [a for a in TOP_10_AIRPORTS if a != origin],
+                            index=1)
+    with c3:
+        airline_label = st.selectbox("Airline", list(AIRLINES.keys()))
+        airline = AIRLINES[airline_label]
 
-    col7, col8 = st.columns(2)
-    with col7:
-        elapsed_time = st.number_input("Scheduled Flight Duration (min)", 60, 600, 180)
-    with col8:
-        congestion = st.slider("Origin Airport Congestion (flights in past 2h)", 0, 50, 10)
+    c4, c5 = st.columns(2)
+    with c4:
+        flight_date = st.date_input(
+            "Departure Date",
+            value=date.today(),
+            min_value=date(2024, 1, 1),
+            max_value=date(2026, 12, 31),
+        )
+    with c5:
+        dep_time = st.time_input("Scheduled Departure Time", value=time(8, 0), step=900)
 
-    prior_delay = st.slider("Prior Leg Arrival Delay (min)", -30.0, 120.0, 0.0, step=1.0)
+    c6, c7 = st.columns(2)
+    with c6:
+        elapsed_time = st.number_input("Scheduled Flight Duration (min)", 60, 600, 180, step=5)
+    with c7:
+        prev_delayed = st.checkbox("Previous flight on this aircraft was delayed")
+        prior_delay  = st.slider("Previous flight delay (min)", 0, 180, 30,
+                                 disabled=not prev_delayed)
+        if not prev_delayed:
+            prior_delay = 0.0
 
-    # ── Weather conditions ───────────────────────────────────────────────────
-    st.subheader("Weather at Origin")
-    wc1, wc2, wc3 = st.columns(3)
-    with wc1:
-        temp      = st.number_input("Temperature (°C)", -30.0, 45.0, 15.0)
-        dew       = st.number_input("Dew Point (°C)",   -30.0, 30.0, 8.0)
-    with wc2:
-        wind_speed = st.number_input("Wind Speed (m/s)", 0.0, 30.0, 5.0)
-        wind_dir   = st.number_input("Wind Direction (°)", 0.0, 360.0, 180.0)
-    with wc3:
-        visibility = st.number_input("Visibility (m)", 0.0, 10000.0, 9000.0)
-        slp        = st.number_input("Sea Level Pressure (hPa)", 950.0, 1050.0, 1013.0)
+    # Auto-estimate congestion from departure hour
+    congestion = CONGESTION_BY_HOUR.get(dep_time.hour, 10)
+    st.caption(f"ℹ️ Estimated airport congestion at {dep_time.strftime('%H:%M')}: "
+               f"~{congestion} flights in the past 2 hours")
 
-    # ── Prediction ──────────────────────────────────────────────────────────
+    # ── Weather Conditions ───────────────────────────────────────────────────
+    st.subheader("🌤️ Weather Conditions at Origin")
+    st.caption("Select the general weather — exact sensor values are estimated automatically.")
+
+    weather_label = st.radio(
+        "Current conditions",
+        options=list(WEATHER_PRESETS.keys()),
+        horizontal=True,
+    )
+    weather = WEATHER_PRESETS[weather_label]
+
+    # Show what values will be used (collapsed by default)
+    with st.expander("View estimated sensor values"):
+        wc1, wc2, wc3 = st.columns(3)
+        wc1.metric("Temperature", f"{weather['temp']}°C")
+        wc1.metric("Dew Point",   f"{weather['dew']}°C")
+        wc2.metric("Wind Speed",  f"{weather['wind_speed']} m/s")
+        wc2.metric("Visibility",  f"{weather['visibility']:.0f} m")
+        wc3.metric("Sea Level Pressure", f"{weather['slp']} hPa")
+
+    # ── Predict ──────────────────────────────────────────────────────────────
     st.divider()
     if st.button("🔮 Predict Delay", type="primary", use_container_width=True):
         with st.spinner("Running model…"):
             try:
                 input_df = _build_input_row(
-                    spark, origin, dest, airline, month, day_of_week, dep_hour,
-                    elapsed_time, congestion, prior_delay,
-                    temp, dew, wind_speed, wind_dir, visibility, slp,
+                    spark, origin, dest, airline, flight_date, dep_time,
+                    elapsed_time, congestion, prior_delay, weather,
                 )
                 p_delayed, expected_delay = _predict(spark, clf_model, reg_model, input_df)
 
-                # ── Results display ──────────────────────────────────────────
                 r1, r2 = st.columns(2)
                 with r1:
-                    st.metric(
-                        label="P(Departure Delayed)",
-                        value=f"{p_delayed:.1%}",
-                        delta=f"{'High risk' if p_delayed > 0.5 else 'Low risk'}",
-                        delta_color="inverse",
-                    )
+                    st.metric("P(Departure Delayed)",
+                              f"{p_delayed:.1%}",
+                              delta="High risk" if p_delayed > 0.5 else "Low risk",
+                              delta_color="inverse")
                 with r2:
-                    st.metric(
-                        label="Expected Departure Delay",
-                        value=f"{expected_delay:.1f} min",
-                        delta=f"{'Significant' if expected_delay > 15 else 'Minor'}",
-                        delta_color="inverse",
-                    )
+                    st.metric("Expected Departure Delay",
+                              f"{expected_delay:.1f} min",
+                              delta="Significant" if expected_delay > 15 else "Minor",
+                              delta_color="inverse")
 
-                # Colour-coded assessment
                 if expected_delay < 5:
                     st.success("✅ Flight is likely on time.")
                 elif expected_delay < 15:
-                    st.info("⏱ Minor delay possible — plan for a small buffer.")
+                    st.info("⏱ Minor delay possible — plan a small buffer.")
                 elif expected_delay < 45:
-                    st.warning("⚠️ Moderate delay expected — notify connecting passengers.")
+                    st.warning("⚠️ Moderate delay expected.")
                 else:
-                    st.error("🚨 Significant delay likely — consider rebooking options.")
+                    st.error("🚨 Significant delay likely.")
 
-                # Breakdown
                 with st.expander("Model details"):
-                    st.write(f"**Stage 1 — P(delay > 0):** `{p_delayed:.4f}`")
                     cond = expected_delay / p_delayed if p_delayed > 1e-6 else 0.0
-                    st.write(f"**Stage 2 — E[delay | delay > 0]:** `{cond:.1f} min`")
-                    st.write(f"**Combined — E[delay]:** `{expected_delay:.1f} min`")
+                    st.write(f"**P(delay > 0):** `{p_delayed:.4f}`")
+                    st.write(f"**E[delay | delay > 0]:** `{cond:.1f} min`")
+                    st.write(f"**Combined E[delay]:** `{expected_delay:.1f} min`")
+                    st.write(f"**Date:** {flight_date.strftime('%A, %d %b %Y')}  "
+                             f"**Departure:** {dep_time.strftime('%H:%M')}")
                     st.caption(
-                        "Note: R² ≈ 0.05 across all models — flight delay is "
-                        "driven largely by unobserved factors (ATC, crew, gate conflicts). "
-                        "Use this as a probabilistic signal, not a precise forecast."
+                        "R² ≈ 0.05 across all models. Flight delay is driven largely by "
+                        "unobserved factors (ATC, crew, gate conflicts). Use this as a "
+                        "probabilistic signal, not a precise forecast."
                     )
 
             except Exception as exc:
