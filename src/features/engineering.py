@@ -34,6 +34,7 @@ from config.settings import (
     AIRPORT_RUNWAYS,
     AIRPORT_STATIONS,
     BTS_FEATURE_COLS,
+    FULL_FEATURE_COLS,
     MIN_WEATHER_COVERAGE,
     PATHS,
     SPLIT_TEST_MONTHS,
@@ -236,6 +237,173 @@ def _report_weather_coverage(flights, min_coverage: float = MIN_WEATHER_COVERAGE
 
 
 # ---------------------------------------------------------------------------
+# BTS delay-cause daily airport aggregates (same-day, prior-flight)
+# ---------------------------------------------------------------------------
+
+def _add_delay_cause_aggregates(flights) -> object:
+    """
+    For each flight, compute same-day prior-flight delay-cause aggregates
+    at the origin airport.  Only flights with ``scheduled_departure_utc``
+    strictly BEFORE the current flight are included — no target leakage.
+
+    Uses BTS delay-cause columns (CarrierDelay, WeatherDelay, NASDelay,
+    SecurityDelay, LateAircraftDelay) that we already download.
+    """
+    dep_sec = F.col("scheduled_departure_utc").cast("long")
+
+    # Window: same Origin + same calendar date, ordered by departure time,
+    # all rows BEFORE the current row (excluding current row).
+    day_prior = (
+        Window.partitionBy("Origin", F.to_date("scheduled_departure_utc"))
+        .orderBy(dep_sec)
+        .rowsBetween(Window.unboundedPreceding, -1)
+    )
+
+    result = (
+        flights
+        # NAS delays (ATC, airport ops, ground stops)
+        .withColumn("_nas_flag",  F.when(F.col("NASDelay") > 0, 1).otherwise(0))
+        .withColumn("airport_nas_delays_today",
+                    F.coalesce(F.sum("_nas_flag").over(day_prior), F.lit(0)).cast("double"))
+        .withColumn("airport_nas_delay_min_today",
+                    F.coalesce(F.sum("NASDelay").over(day_prior), F.lit(0.0)))
+        # Weather delays
+        .withColumn("_wx_flag",   F.when(F.col("WeatherDelay") > 0, 1).otherwise(0))
+        .withColumn("airport_wx_delays_today",
+                    F.coalesce(F.sum("_wx_flag").over(day_prior), F.lit(0)).cast("double"))
+        .withColumn("airport_wx_delay_min_today",
+                    F.coalesce(F.sum("WeatherDelay").over(day_prior), F.lit(0.0)))
+        # Carrier delays
+        .withColumn("_cr_flag",   F.when(F.col("CarrierDelay") > 0, 1).otherwise(0))
+        .withColumn("airport_carrier_delays_today",
+                    F.coalesce(F.sum("_cr_flag").over(day_prior), F.lit(0)).cast("double"))
+        # Late-aircraft cascade
+        .withColumn("_la_flag",   F.when(F.col("LateAircraftDelay") > 0, 1).otherwise(0))
+        .withColumn("airport_late_acft_delays_today",
+                    F.coalesce(F.sum("_la_flag").over(day_prior), F.lit(0)).cast("double"))
+        .withColumn("airport_late_acft_min_today",
+                    F.coalesce(F.sum("LateAircraftDelay").over(day_prior), F.lit(0.0)))
+        # Overall delay picture
+        .withColumn("_del15_flag", F.when(F.col("DepDelay") > 15, 1).otherwise(0))
+        .withColumn("airport_total_delayed_today",
+                    F.coalesce(F.sum("_del15_flag").over(day_prior), F.lit(0)).cast("double"))
+        .withColumn("airport_avg_delay_today",
+                    F.coalesce(F.avg("DepDelay").over(day_prior), F.lit(0.0)))
+        .withColumn("_prior_count",
+                    F.coalesce(F.count("flight_key").over(day_prior), F.lit(0)))
+        .withColumn("airport_delay_rate_today",
+                    F.when(F.col("_prior_count") > 0,
+                           F.col("airport_total_delayed_today") / F.col("_prior_count"))
+                    .otherwise(0.0))
+        # Drop helper columns
+        .drop("_nas_flag", "_wx_flag", "_cr_flag", "_la_flag",
+              "_del15_flag", "_prior_count")
+    )
+    logger.info("Added 10 delay-cause daily aggregate features")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Storm event counts + holiday flags
+# ---------------------------------------------------------------------------
+
+def _add_contextual_features(spark: SparkSession, flights, paths: dict = PATHS) -> object:
+    """
+    Add storm-event counts (6h / 24h windows) and holiday flags.
+
+    Storm events: joined from the preprocessed storm_events Parquet.
+    Holidays: loaded from the holidays JSON and broadcast-joined.
+    Both gracefully fall back to zeros if the data files are missing.
+    """
+    # ── Storm events ─────────────────────────────────────────────────────
+    storm_path = paths["processed"] / f"storm_events_{YEAR}.parquet"
+    if storm_path.exists():
+        logger.info("Joining storm event counts")
+        storms = spark.read.parquet(str(storm_path))
+
+        # Build a per-airport, per-date count
+        storm_daily = (
+            storms
+            .withColumn("event_date", F.to_date("event_date"))
+            .groupBy("airport", "event_date")
+            .agg(
+                F.count("*").alias("_storm_count_24h"),
+                F.sum(
+                    F.when(F.col("event_hour_utc") >= 6, 1).otherwise(0)
+                ).alias("_storm_count_6h"),  # daytime events (06-23 UTC)
+            )
+        )
+
+        flights = flights.withColumn("_fdate", F.to_date("FlightDate"))
+        flights = flights.join(
+            storm_daily,
+            on=(
+                (F.col("Origin") == F.col("airport")) &
+                (F.col("_fdate") == F.col("event_date"))
+            ),
+            how="left",
+        )
+        flights = (
+            flights
+            .withColumn("storm_events_24h",
+                        F.coalesce(F.col("_storm_count_24h"), F.lit(0)).cast("double"))
+            .withColumn("storm_events_6h",
+                        F.coalesce(F.col("_storm_count_6h"), F.lit(0)).cast("double"))
+            .drop("_fdate", "airport", "event_date", "_storm_count_24h", "_storm_count_6h")
+        )
+        logger.info("Storm event features added")
+    else:
+        logger.info("No storm events Parquet — filling storm features with zeros")
+        flights = (
+            flights
+            .withColumn("storm_events_24h", F.lit(0.0))
+            .withColumn("storm_events_6h",  F.lit(0.0))
+        )
+
+    # ── Holidays ─────────────────────────────────────────────────────────
+    holidays_path = paths["processed"] / f"us_holidays_{YEAR}.json"
+    if holidays_path.exists():
+        import json as _json
+        with open(holidays_path) as fh:
+            holidays_data = _json.load(fh)
+        holiday_dates = {h["date"] for h in holidays_data}
+
+        # Also compute adjacent dates (day before + day after each holiday)
+        from datetime import datetime, timedelta
+        adjacent_dates = set()
+        for d in holiday_dates:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            adjacent_dates.add((dt - timedelta(days=1)).strftime("%Y-%m-%d"))
+            adjacent_dates.add((dt + timedelta(days=1)).strftime("%Y-%m-%d"))
+            adjacent_dates.add(d)
+
+        logger.info("Adding holiday flags (%d holidays, %d adjacent dates)",
+                    len(holiday_dates), len(adjacent_dates))
+
+        holiday_list = sorted(holiday_dates)
+        adjacent_list = sorted(adjacent_dates)
+
+        flights = (
+            flights
+            .withColumn("_date_str", F.col("FlightDate").cast("string"))
+            .withColumn("is_holiday",
+                        F.when(F.col("_date_str").isin(holiday_list), 1.0).otherwise(0.0))
+            .withColumn("is_holiday_adjacent",
+                        F.when(F.col("_date_str").isin(adjacent_list), 1.0).otherwise(0.0))
+            .drop("_date_str")
+        )
+    else:
+        logger.info("No holidays JSON — filling holiday features with zeros")
+        flights = (
+            flights
+            .withColumn("is_holiday",          F.lit(0.0))
+            .withColumn("is_holiday_adjacent", F.lit(0.0))
+        )
+
+    return flights
+
+
+# ---------------------------------------------------------------------------
 # Aviation feature derivation + labels + split
 # ---------------------------------------------------------------------------
 
@@ -324,6 +492,12 @@ def build_features(
     logger.info("Deriving aviation features and labels")
     df = _add_derived_features(df)
 
+    logger.info("Computing delay-cause daily aggregates")
+    df = _add_delay_cause_aggregates(df)
+
+    logger.info("Adding contextual features (storm events + holidays)")
+    df = _add_contextual_features(spark, df, paths=paths)
+
     return df
 
 
@@ -332,11 +506,12 @@ def save_feature_sets(
     paths: dict = PATHS,
     bts_feature_cols: list = BTS_FEATURE_COLS,
     weather_feature_cols: list = WEATHER_FEATURE_COLS,
+    full_feature_cols: list = FULL_FEATURE_COLS,
 ) -> None:
     """
-    Write four partitioned Parquet feature sets:
-      departure_bts_only / departure_bts_weather
-      arrival_bts_only   / arrival_bts_weather
+    Write six partitioned Parquet feature sets:
+      departure_bts_only / departure_bts_weather / departure_full
+      arrival_bts_only   / arrival_bts_weather   / arrival_full
     """
     for task, raw_tgt, log_tgt, cls_tgt in [
         ("departure", "DepDelay", "log_DepDelay", "DEP_DEL15"),
@@ -345,6 +520,7 @@ def save_feature_sets(
         for variant, p_cols in [
             ("bts_only",    bts_feature_cols),
             ("bts_weather", weather_feature_cols),
+            ("full",        full_feature_cols),
         ]:
             out_dir = paths["features"] / f"{task}_{variant}"
             meta = ["flight_key", "FlightDate", "data_split", raw_tgt, log_tgt, cls_tgt]

@@ -30,6 +30,7 @@ from pyspark.sql import functions as F
 from config.settings import (
     BTS_FEATURE_COLS,
     CV_FOLDS,
+    FULL_FEATURE_COLS,
     GBT_PARAM_GRID,
     GBT_PARAMS,
     LR_PARAM_GRID,
@@ -117,6 +118,7 @@ def run_ablation(
     paths: dict = PATHS,
     bts_feature_cols: list = BTS_FEATURE_COLS,
     weather_feature_cols: list = WEATHER_FEATURE_COLS,
+    full_feature_cols: list = FULL_FEATURE_COLS,
 ) -> pd.DataFrame:
     """
     Run the full ablation matrix and return a summary DataFrame.
@@ -139,6 +141,7 @@ def run_ablation(
         for condition, p_cols in [
             ("bts_only",    bts_feature_cols),
             ("bts_weather", weather_feature_cols),
+            ("full",        full_feature_cols),
         ]:
             dataset_name = f"{task}_{condition}"
             ds = spark.read.parquet(str(paths["features"] / dataset_name))

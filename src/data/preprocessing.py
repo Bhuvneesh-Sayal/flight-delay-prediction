@@ -90,6 +90,12 @@ def clean_flights(
         .withColumn("CRSElapsedTime", F.col("CRSElapsedTime").cast("double"))
         .withColumn("CRSDepTime",     F.col("CRSDepTime").cast("int"))
         .withColumn("CRSArrTime",     F.col("CRSArrTime").cast("int"))
+        # Delay-cause columns (null for on-time flights → fill with 0)
+        .withColumn("CarrierDelay",      F.coalesce(F.col("CarrierDelay").cast("double"),      F.lit(0.0)))
+        .withColumn("WeatherDelay",      F.coalesce(F.col("WeatherDelay").cast("double"),      F.lit(0.0)))
+        .withColumn("NASDelay",          F.coalesce(F.col("NASDelay").cast("double"),          F.lit(0.0)))
+        .withColumn("SecurityDelay",     F.coalesce(F.col("SecurityDelay").cast("double"),     F.lit(0.0)))
+        .withColumn("LateAircraftDelay", F.coalesce(F.col("LateAircraftDelay").cast("double"), F.lit(0.0)))
         # Calendar features
         .withColumn("scheduled_month",       F.month("FlightDate"))
         .withColumn("scheduled_day_of_week", F.dayofweek("FlightDate"))
@@ -238,17 +244,88 @@ def standardise_weather(
 
 
 # ---------------------------------------------------------------------------
-# Convenience: run both steps
+# NOAA Storm Events standardisation
+# ---------------------------------------------------------------------------
+
+def standardise_storm_events(
+    storm_csv_path,
+    year: int = YEAR,
+    paths: dict = PATHS,
+) -> object:
+    """
+    Parse the NOAA Storm Events detail CSV, assign each event to the nearest
+    airport (within STORM_RADIUS_DEG), and persist a compact Parquet with
+    columns: airport, event_date, event_hour_utc, event_type.
+
+    Returns the output Path, or None if *storm_csv_path* is None / missing.
+    """
+    from config.settings import AIRPORT_COORDS, STORM_RADIUS_DEG
+
+    if storm_csv_path is None or not Path(storm_csv_path).exists():
+        logger.info("No storm events CSV — storm features will be zero.")
+        return None
+
+    logger.info("Parsing NOAA Storm Events…")
+    df = pd.read_csv(storm_csv_path, dtype=str, low_memory=False)
+
+    # Parse coordinates
+    for c in ("BEGIN_LAT", "BEGIN_LON"):
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.dropna(subset=["BEGIN_LAT", "BEGIN_LON"])
+
+    # Parse event datetime
+    df["event_dt"] = pd.to_datetime(df["BEGIN_DATE_TIME"], errors="coerce")
+    df = df.dropna(subset=["event_dt"])
+    df = df[df["event_dt"].dt.year == year]
+
+    # Match each event to the nearest airport within radius
+    rows = []
+    for _, row in df.iterrows():
+        lat, lon = row["BEGIN_LAT"], row["BEGIN_LON"]
+        for arpt, (alat, alon) in AIRPORT_COORDS.items():
+            if abs(lat - alat) < STORM_RADIUS_DEG and abs(lon - alon) < STORM_RADIUS_DEG:
+                rows.append({
+                    "airport": arpt,
+                    "event_date": row["event_dt"].strftime("%Y-%m-%d"),
+                    "event_hour_utc": row["event_dt"].hour,
+                    "event_type": row.get("EVENT_TYPE", "Unknown"),
+                })
+                break  # assign to first matching airport only
+
+    if not rows:
+        logger.warning("No storm events matched our airport cohort.")
+        return None
+
+    out_df = pd.DataFrame(rows)
+    out = paths["processed"] / f"storm_events_{year}.parquet"
+    if out.exists():
+        if out.is_dir():
+            shutil.rmtree(out)
+        else:
+            out.unlink()
+
+    out_df.to_parquet(out, index=False, compression="snappy")
+    logger.info(
+        "Storm events table: %s events at %d airports → %s",
+        f"{len(out_df):,}", out_df["airport"].nunique(), out,
+    )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Convenience: run all preprocessing steps
 # ---------------------------------------------------------------------------
 
 def run_preprocessing(
     spark: SparkSession,
     bts_csv_files: list,
     noaa_paths: dict,
+    storm_csv_path=None,
     paths: dict = PATHS,
 ) -> tuple:
     """
-    Run BTS cleaning, data-quality checks and NOAA standardisation.
+    Run BTS cleaning, data-quality checks, NOAA standardisation, and
+    storm events standardisation.
     Returns (flights_df, weather_parquet_path).
     """
     logger.info("=== Flight Cleaning ===")
@@ -257,5 +334,8 @@ def run_preprocessing(
 
     logger.info("=== Weather Standardisation ===")
     weather_path = standardise_weather(noaa_paths, paths=paths)
+
+    logger.info("=== Storm Events Standardisation ===")
+    standardise_storm_events(storm_csv_path, paths=paths)
 
     return flights_df, weather_path

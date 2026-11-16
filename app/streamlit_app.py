@@ -80,8 +80,16 @@ def load_models():
         )
         spark.sparkContext.setLogLevel("ERROR")
 
-        clf_path = PATHS["models"] / "hurdle_departure_classifier"
-        reg_path = PATHS["models"] / "hurdle_departure_regressor"
+        clf_path = PATHS["models"] / "hurdle_departure_full_classifier"
+        reg_path = PATHS["models"] / "hurdle_departure_full_regressor"
+
+        # Fall back to weather-only or legacy naming
+        if not clf_path.exists():
+            clf_path = PATHS["models"] / "hurdle_departure_bts_weather_classifier"
+            reg_path = PATHS["models"] / "hurdle_departure_bts_weather_regressor"
+        if not clf_path.exists():
+            clf_path = PATHS["models"] / "hurdle_departure_classifier"
+            reg_path = PATHS["models"] / "hurdle_departure_regressor"
 
         if not clf_path.exists() or not reg_path.exists():
             return None, None, None
