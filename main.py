@@ -90,6 +90,7 @@ def _banner(title: str) -> None:
 def _run(steps: list) -> None:
     bts_csv_files = None
     noaa_paths = None
+    storm_csv = None
     flights_df = None
     weather_parquet_path = None
 
@@ -100,7 +101,7 @@ def _run(steps: list) -> None:
     if "ingest" in steps:
         _banner("STEP 1 — Data Ingestion")
         from src.data.ingestion import run_ingestion
-        bts_csv_files, noaa_paths = run_ingestion()
+        bts_csv_files, noaa_paths, storm_csv, _holidays = run_ingestion()
 
     # If ingest was skipped but prep is requested, discover files already on disk
     if "prep" in steps and bts_csv_files is None:
@@ -112,7 +113,7 @@ def _run(steps: list) -> None:
         _banner("STEP 2 — Preprocessing")
         from src.data.preprocessing import run_preprocessing
         flights_df, weather_parquet_path = run_preprocessing(
-            spark, bts_csv_files, noaa_paths
+            spark, bts_csv_files, noaa_paths, storm_csv_path=storm_csv,
         )
 
     # ── Step 3: Feature engineering ────────────────────────────────────────

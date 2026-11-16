@@ -22,15 +22,16 @@ YEAR: int = 2025
 # Paths  (all relative to PROJECT_DIR so they work on Drive and locally)
 # ---------------------------------------------------------------------------
 PATHS: dict = {
-    "bts_raw":   PROJECT_DIR / "data" / "raw"  / "bts",
-    "noaa_raw":  PROJECT_DIR / "data" / "raw"  / "noaa",
-    "interim":   PROJECT_DIR / "data" / "interim",
-    "processed": PROJECT_DIR / "data" / "processed",
-    "features":  PROJECT_DIR / "data" / "features",
-    "models":    PROJECT_DIR / "models",
-    "results":   PROJECT_DIR / "results",
-    "benchmarks":PROJECT_DIR / "benchmarks_output",
-    "logs":      PROJECT_DIR / "logs",
+    "bts_raw":    PROJECT_DIR / "data" / "raw"  / "bts",
+    "noaa_raw":   PROJECT_DIR / "data" / "raw"  / "noaa",
+    "storms_raw": PROJECT_DIR / "data" / "raw"  / "storms",
+    "interim":    PROJECT_DIR / "data" / "interim",
+    "processed":  PROJECT_DIR / "data" / "processed",
+    "features":   PROJECT_DIR / "data" / "features",
+    "models":     PROJECT_DIR / "models",
+    "results":    PROJECT_DIR / "results",
+    "benchmarks": PROJECT_DIR / "benchmarks_output",
+    "logs":       PROJECT_DIR / "logs",
 }
 
 # Ensure all directories exist at import time
@@ -45,6 +46,15 @@ NOAA_BASE_URL: str = (
     f"https://www.ncei.noaa.gov/oa/global-historical-climatology-network"
     f"/hourly/access/by-year/{YEAR}/psv"
 )
+
+# NOAA Storm Events — severe weather (thunderstorms, tornadoes, hail, floods)
+# File naming convention changes each release; discover dynamically in ingestion.
+STORM_EVENTS_DIR_URL: str = (
+    "https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/"
+)
+
+# US public holidays API (no auth needed)
+HOLIDAYS_API_URL: str = f"https://date.nager.at/api/v3/PublicHolidays/{YEAR}/US"
 
 # ---------------------------------------------------------------------------
 # Closed-cohort airport selection
@@ -79,6 +89,23 @@ AIRPORT_RUNWAYS: dict = {
     "SEA": 160.0,
 }
 
+# Airport coordinates (lat, lon) for storm-event proximity matching
+AIRPORT_COORDS: dict = {
+    "ATL": (33.64, -84.43),
+    "CLT": (35.21, -80.94),
+    "DEN": (39.86, -104.67),
+    "DFW": (32.90, -97.04),
+    "LAS": (36.08, -115.15),
+    "LAX": (33.94, -118.41),
+    "MCO": (28.43, -81.31),
+    "ORD": (41.97, -87.91),
+    "PHX": (33.44, -112.01),
+    "SEA": (47.45, -122.31),
+}
+
+# Storm proximity radius in degrees (~50 km ≈ 0.45°)
+STORM_RADIUS_DEG: float = 0.45
+
 # ---------------------------------------------------------------------------
 # BTS columns to keep from the raw CSV files
 # ---------------------------------------------------------------------------
@@ -95,6 +122,12 @@ BTS_KEEP_COLS: list = [
     "Cancelled",
     "Diverted",
     "CRSElapsedTime",
+    # Delay-cause breakdown (populated only for delayed flights; null otherwise)
+    "CarrierDelay",         # minutes attributed to carrier (maintenance, crew, baggage)
+    "WeatherDelay",         # minutes attributed to significant weather
+    "NASDelay",             # minutes attributed to NAS (ATC, airport ops, ground stops)
+    "SecurityDelay",        # minutes attributed to security events
+    "LateAircraftDelay",    # minutes attributed to cascading late-arriving aircraft
 ]
 
 # NOAA columns to keep from the raw PSV files
@@ -135,6 +168,36 @@ WEATHER_FEATURE_COLS: list = BTS_FEATURE_COLS + [
     "weather_available",
     "weather_age_minutes",
 ]
+
+# ---------------------------------------------------------------------------
+# Enhanced feature columns — BTS delay-cause aggregates + storms + holidays
+# ---------------------------------------------------------------------------
+# Same-day, prior-flight airport aggregates (no target leakage)
+DELAY_AGG_FEATURE_COLS: list = [
+    "airport_nas_delays_today",         # count of prior NAS-delayed flights
+    "airport_nas_delay_min_today",      # sum of NASDelay minutes from prior flights
+    "airport_wx_delays_today",          # count of prior weather-delayed flights
+    "airport_wx_delay_min_today",       # sum of WeatherDelay minutes
+    "airport_carrier_delays_today",     # count of prior carrier-delayed flights
+    "airport_late_acft_delays_today",   # count of prior late-aircraft flights
+    "airport_late_acft_min_today",      # sum of LateAircraftDelay minutes
+    "airport_total_delayed_today",      # count of prior flights with DepDelay > 15
+    "airport_avg_delay_today",          # mean DepDelay of prior flights
+    "airport_delay_rate_today",         # fraction of prior flights delayed > 15 min
+]
+
+# NOAA Storm Events + US holidays
+CONTEXTUAL_FEATURE_COLS: list = [
+    "storm_events_24h",                 # severe weather events near airport in past 24h
+    "storm_events_6h",                  # severe weather events near airport in past 6h
+    "is_holiday",                       # 1 if departure date is a US federal holiday
+    "is_holiday_adjacent",              # 1 if within ±1 day of a holiday
+]
+
+# Full enhanced set: weather + delay aggregates + storms + holidays
+FULL_FEATURE_COLS: list = (
+    WEATHER_FEATURE_COLS + DELAY_AGG_FEATURE_COLS + CONTEXTUAL_FEATURE_COLS
+)
 
 # ---------------------------------------------------------------------------
 # Chronological data-split boundaries (months are inclusive)

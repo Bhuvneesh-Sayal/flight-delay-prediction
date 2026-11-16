@@ -7,6 +7,8 @@ Handles all remote data acquisition:
   - Retry with exponential backoff on failed downloads
   - BTS monthly ZIP → CSV extraction
   - NOAA hourly PSV download
+  - NOAA Storm Events CSV download
+  - US public holidays JSON download
 
 Public API
 ----------
@@ -14,10 +16,14 @@ Public API
   get_or_download(url, destination, min_bytes, max_retries) -> Path
   ingest_bts(year, paths, bts_base_url) -> list[str]
   ingest_noaa(year, paths, noaa_base_url, airport_stations) -> dict[str, Path]
+  ingest_storm_events(year, paths) -> Path | None
+  ingest_holidays(year, paths) -> Path | None
 """
 
 import hashlib
+import gzip
 import json
+import re
 import shutil
 import time
 import zipfile
@@ -28,8 +34,10 @@ import requests
 from config.settings import (
     AIRPORT_STATIONS,
     BTS_BASE_URL,
+    HOLIDAYS_API_URL,
     NOAA_BASE_URL,
     PATHS,
+    STORM_EVENTS_DIR_URL,
     YEAR,
 )
 from src.utils.logger import get_logger
@@ -217,6 +225,100 @@ def ingest_noaa(
 
 
 # ---------------------------------------------------------------------------
+# NOAA Storm Events ingestion
+# ---------------------------------------------------------------------------
+
+def ingest_storm_events(
+    year: int = YEAR,
+    paths: dict = PATHS,
+    storm_dir_url: str = STORM_EVENTS_DIR_URL,
+) -> object:
+    """
+    Download the NOAA Storm Events detail CSV for *year*.
+
+    The filename changes with each data release so we scrape the directory
+    listing to find the latest ``StormEvents_details-*_d{year}_*.csv.gz``.
+
+    Returns the local Path to the downloaded .csv.gz, or None on failure.
+    """
+    dest_dir = paths["storms_raw"]
+    dest_csv = dest_dir / f"storm_events_{year}.csv"
+
+    if dest_csv.exists() and dest_csv.stat().st_size > 10_000:
+        logger.info("Cache hit: %s (%s bytes)", dest_csv.name, f"{dest_csv.stat().st_size:,}")
+        return dest_csv
+
+    # Discover the filename from the directory listing
+    try:
+        resp = _session.get(storm_dir_url, timeout=30)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("Could not list NOAA Storm Events directory: %s", exc)
+        return None
+
+    pattern = re.compile(
+        rf"StormEvents_details-ftp_v[\d.]+_d{year}_c\d+\.csv\.gz"
+    )
+    matches = pattern.findall(resp.text)
+    if not matches:
+        logger.warning("No Storm Events file found for year %d.", year)
+        return None
+
+    filename = sorted(matches)[-1]  # latest release
+    url = f"{storm_dir_url}{filename}"
+
+    gz_dest = dest_dir / filename
+    try:
+        get_or_download(url, gz_dest, min_bytes=5_000, max_retries=3)
+    except RuntimeError:
+        logger.warning("Failed to download Storm Events: %s", url)
+        return None
+
+    # Decompress .csv.gz → .csv
+    logger.info("Decompressing %s…", gz_dest.name)
+    with gzip.open(gz_dest, "rb") as f_in, open(dest_csv, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+
+    logger.info("Storm Events: %s → %s", gz_dest.name, dest_csv.name)
+    return dest_csv
+
+
+# ---------------------------------------------------------------------------
+# US holidays ingestion
+# ---------------------------------------------------------------------------
+
+def ingest_holidays(
+    year: int = YEAR,
+    paths: dict = PATHS,
+    holidays_url: str = HOLIDAYS_API_URL,
+) -> object:
+    """
+    Download US federal holidays for *year* from the Nager.Date API.
+
+    Returns the local Path to a JSON file, or None on failure.
+    """
+    dest = paths["processed"] / f"us_holidays_{year}.json"
+
+    if dest.exists() and dest.stat().st_size > 50:
+        logger.info("Cache hit: %s", dest.name)
+        return dest
+
+    try:
+        resp = _session.get(holidays_url, timeout=15)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("Could not download US holidays: %s", exc)
+        return None
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, "w") as fh:
+        fh.write(resp.text)
+
+    logger.info("US holidays saved → %s (%d entries)", dest, resp.text.count('"date"'))
+    return dest
+
+
+# ---------------------------------------------------------------------------
 # Manifest persistence
 # ---------------------------------------------------------------------------
 
@@ -270,8 +372,9 @@ def run_ingestion(
     paths: dict = PATHS,
 ) -> tuple:
     """
-    Run full ingestion (BTS + NOAA) and persist the manifest.
-    Returns (bts_csv_files, noaa_paths).
+    Run full ingestion (BTS + NOAA + Storm Events + Holidays) and persist
+    the manifest.
+    Returns (bts_csv_files, noaa_paths, storm_csv_path, holidays_json_path).
     """
     logger.info("=== BTS Ingestion ===")
     bts_csv_files = ingest_bts(year=year, paths=paths)
@@ -279,5 +382,11 @@ def run_ingestion(
     logger.info("=== NOAA Ingestion ===")
     noaa_paths = ingest_noaa(year=year, paths=paths)
 
+    logger.info("=== NOAA Storm Events Ingestion ===")
+    storm_csv = ingest_storm_events(year=year, paths=paths)
+
+    logger.info("=== US Holidays Ingestion ===")
+    holidays_json = ingest_holidays(year=year, paths=paths)
+
     save_manifest(paths=paths)
-    return bts_csv_files, noaa_paths
+    return bts_csv_files, noaa_paths, storm_csv, holidays_json
