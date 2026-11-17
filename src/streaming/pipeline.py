@@ -49,7 +49,7 @@ import pyspark.sql.types as T
 from pyspark.ml import PipelineModel
 from pyspark.sql import DataFrame, SparkSession
 
-from config.settings import PATHS, SPARK_CONFIG, WEATHER_FEATURE_COLS
+from config.settings import PATHS, SPARK_CONFIG, WEATHER_FEATURE_COLS, YEAR
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -139,6 +139,7 @@ def _make_weather_source(spark: SparkSession, weather_parquet: Path) -> DataFram
 def _make_batch_processor(
     weather_df: DataFrame,
     hurdle_model: PipelineModel,
+    output_dir: Path,
 ):
     """
     Return a closure suitable for ``writeStream.foreachBatch``.
@@ -200,10 +201,7 @@ def _make_batch_processor(
                 F.when(F.col("w_vis") < 4800.0, 1.0).otherwise(0.0))
         )
 
-        # 3. Run hurdle model — Stage 1 (classifier)
-        clf_preds = hurdle_model.stages[0].transform(enriched)   # assumes 2-stage wrapper
-        # NOTE: hurdle_model here is the full PipelineModel for the classifier.
-        # For simplicity we score with the classifier pipeline and report P(delay).
+        # 3. Run hurdle model — classifier scores
         scored = hurdle_model.transform(enriched)
         output = (
             scored
@@ -220,6 +218,7 @@ def _make_batch_processor(
             )
         )
 
+        output.write.mode("append").parquet(str(output_dir))
         logger.info("  Batch %d: scored %d flights.", batch_id, output.count())
 
     return process_batch
@@ -254,8 +253,12 @@ def run_streaming_pipeline(
     for d in [flight_input, output_dir, checkpoint]:
         d.mkdir(parents=True, exist_ok=True)
 
-    weather_parquet = paths["processed"] / f"noaa_hourly_2025.parquet"
-    clf_model_dir   = paths["models"] / f"{task}_hurdle_classifier"
+    weather_parquet = paths["processed"] / f"noaa_hourly_{YEAR}.parquet"
+
+    # Try hurdle model paths in order of preference (matches hurdle.py save pattern)
+    clf_model_dir = paths["models"] / f"hurdle_{task}_full_classifier"
+    if not clf_model_dir.exists():
+        clf_model_dir = paths["models"] / f"hurdle_{task}_bts_weather_classifier"
 
     if not weather_parquet.exists():
         raise FileNotFoundError(
@@ -276,7 +279,7 @@ def run_streaming_pipeline(
     logger.info("Starting streaming pipeline (input: %s)…", flight_input)
     flight_stream = _make_flight_source(spark, flight_input)
 
-    batch_fn = _make_batch_processor(weather_df, hurdle_model)
+    batch_fn = _make_batch_processor(weather_df, hurdle_model, output_dir)
 
     query = (
         flight_stream.writeStream

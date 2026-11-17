@@ -33,6 +33,7 @@ from pyspark.sql import functions as F
 
 from config.settings import (
     BTS_FEATURE_COLS,
+    FULL_FEATURE_COLS,
     PATHS,
     WEATHER_FEATURE_COLS,
 )
@@ -43,6 +44,7 @@ logger = get_logger(__name__)
 _CONDITION_COLS = {
     "bts_only":    BTS_FEATURE_COLS,
     "bts_weather": WEATHER_FEATURE_COLS,
+    "full":        FULL_FEATURE_COLS,
 }
 
 _TARGET_COL = {
@@ -149,6 +151,7 @@ def plot_hurdle_calibration(
     spark: SparkSession,
     paths: dict,
     task: str = "departure",
+    condition: str = "bts_weather",
     n_bins: int = 10,
 ) -> None:
     """
@@ -161,7 +164,7 @@ def plot_hurdle_calibration(
     from pyspark.ml.classification import LogisticRegressionModel
     from pyspark.sql import types as T
 
-    clf_dir = paths["models"] / f"{task}_hurdle_classifier"
+    clf_dir = paths["models"] / f"hurdle_{task}_{condition}_classifier"
     if not clf_dir.exists():
         logger.warning("Hurdle classifier not found at %s — skipping calibration.", clf_dir)
         return
@@ -169,7 +172,7 @@ def plot_hurdle_calibration(
     get_prob1 = F.udf(lambda v: float(v[1]), T.DoubleType())
 
     target_col = _TARGET_COL[task]
-    feature_dir = paths["features"] / f"{task}_bts_weather"
+    feature_dir = paths["features"] / f"{task}_{condition}"
 
     clf_model = PipelineModel.load(str(clf_dir))
     test_df = (
@@ -200,11 +203,11 @@ def plot_hurdle_calibration(
     ax.plot([0, 1], [0, 1], "r--", linewidth=1.2, label="Perfect calibration")
     ax.set_xlabel("Mean Predicted P(delay > 0)")
     ax.set_ylabel("Actual Fraction Delayed")
-    ax.set_title(f"Hurdle Classifier Calibration — {task}", fontsize=11, fontweight="bold")
+    ax.set_title(f"Hurdle Classifier Calibration — {task} | {condition}", fontsize=11, fontweight="bold")
     ax.legend(fontsize=9)
     ax.grid(linestyle="--", alpha=0.4)
     plt.tight_layout()
-    out = paths["results"] / f"hurdle_calibration_{task}.png"
+    out = paths["results"] / f"hurdle_calibration_{task}_{condition}.png"
     plt.savefig(out, dpi=150)
     plt.close(fig)
     logger.info("Hurdle calibration plot saved → %s", out)
@@ -228,7 +231,7 @@ def run_residual_analysis(
     Uses a 10 % sample of the test partition to keep it fast.
     """
     tasks      = tasks      or ["departure", "arrival"]
-    conditions = conditions or ["bts_only", "bts_weather"]
+    conditions = conditions or ["bts_only", "bts_weather", "full"]
     algorithms = algorithms or ["RandomForest", "GBTRegressor"]
 
     for task in tasks:
@@ -279,7 +282,8 @@ def run_residual_analysis(
                 )
                 logger.info("  Residual plots saved for %s", stem)
 
-        # Hurdle calibration curve
-        plot_hurdle_calibration(spark, paths, task=task)
+        # Hurdle calibration curves (hurdle trains on bts_weather and full)
+        for hurdle_cond in ["bts_weather", "full"]:
+            plot_hurdle_calibration(spark, paths, task=task, condition=hurdle_cond)
 
     logger.info("Residual analysis complete.")

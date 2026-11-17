@@ -28,6 +28,7 @@ from pyspark.ml.regression import GBTRegressionModel, RandomForestRegressionMode
 
 from config.settings import (
     BTS_FEATURE_COLS,
+    FULL_FEATURE_COLS,
     PATHS,
     WEATHER_FEATURE_COLS,
 )
@@ -43,6 +44,7 @@ _SUPPORTED_ALGOS = {"RandomForest", "GBTRegressor"}
 _CONDITION_COLS = {
     "bts_only":    BTS_FEATURE_COLS,
     "bts_weather": WEATHER_FEATURE_COLS,
+    "full":        FULL_FEATURE_COLS,
 }
 
 
@@ -165,7 +167,7 @@ def run_feature_importance_analysis(
     algorithms : list of algorithm names to analyse (must be RF or GBT)
     """
     tasks      = tasks      or ["departure", "arrival"]
-    conditions = conditions or ["bts_only", "bts_weather"]
+    conditions = conditions or ["bts_only", "bts_weather", "full"]
     algorithms = algorithms or ["RandomForest", "GBTRegressor"]
 
     all_rows: list = []
