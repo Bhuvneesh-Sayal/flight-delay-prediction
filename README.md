@@ -116,8 +116,8 @@ Airports: `ATL CLT DEN DFW LAS LAX MCO ORD PHX SEA`
 
 ### 1. Data Ingestion (`src/data/ingestion.py`)
 - Cache-first download with atomic `.part` temp files
-- **Retry logic**: 3 retries with exponential backoff (1 s, 2 s, 4 s), then a
-  `RuntimeError`; partial files are cleaned up
+- **Retry logic**: 5 retries with exponential backoff (5 s, 10 s, 20 s, 40 s,
+  80 s), then a `RuntimeError`; partial files are cleaned up
 - SHA-256 checksum logged for every file
 - BTS: ZIPs downloaded, largest CSV member extracted
 - NOAA: PSV files downloaded per station
@@ -149,7 +149,7 @@ Airports: `ATL CLT DEN DFW LAS LAX MCO ORD PHX SEA`
 - **Chronological split**: Jan–Aug train / Sep–Oct validation / Nov–Dec test
 
 ### 4. Ablation Experiments (`src/models/ablation.py`)
-3 algorithms × 2 feature conditions × 2 targets = **12 models**, plus a
+3 algorithms × 3 feature conditions × 2 targets = **18 models**, plus a
 **mean baseline** (train-set mean) for each target and condition.
 
 - **Validation evaluation**: each row reports `Val_MAE_min`, `Val_RMSE_min`
@@ -178,8 +178,9 @@ current numbers in `results/`.*
 - **Aligned boundary**: both stages use the same delay > 0 definition, so the
   classifier's population matches what the regressor was trained on
 - **Combined**: E[delay] = P(delay > 0) × E[delay | delay > 0]
-- **Model persistence**: saved as `models/hurdle_{task}_classifier` and
-  `models/hurdle_{task}_regressor`
+- **Model persistence**: saved as
+  `models/hurdle_{task}_{condition}_classifier` and
+  `models/hurdle_{task}_{condition}_regressor`
 - An earlier version, which used a 15-minute classifier boundary, improved
   departure MAE from 25.15 → 21.35 min (ROC-AUC ≈ 0.67). Re-run
   `--steps hurdle` to refresh these figures.

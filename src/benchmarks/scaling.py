@@ -183,5 +183,5 @@ def plot_scaling_curves(bench_df: pd.DataFrame, paths: dict = PATHS) -> None:
     plt.tight_layout()
     out = paths["benchmarks"] / "scaling_curves.png"
     plt.savefig(out, dpi=300)
-    plt.show()
+    plt.close(fig)
     print(f"Scaling curves saved → {out}")

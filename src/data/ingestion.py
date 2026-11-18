@@ -98,8 +98,8 @@ def get_or_download(
     leaves a corrupt file behind.
 
     On failure the download is retried up to *max_retries* times with
-    exponential backoff (1s, 2s, 4s, ...). A warning is logged for each
-    retry. When all retries are exhausted a RuntimeError is raised.
+    exponential backoff (5 s, 10 s, 20 s, 40 s, 80 s). A warning is logged
+    for each retry. When all retries are exhausted a RuntimeError is raised.
 
     Returns the destination Path.
     """
