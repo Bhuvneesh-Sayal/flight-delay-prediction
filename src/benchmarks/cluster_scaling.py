@@ -80,7 +80,7 @@ def _bench_shuffle_agg(spark: SparkSession, parquet_path: str, rows: int) -> flo
             F.avg("DepDelay").alias("avg_dep_delay"),
             F.stddev("DepDelay").alias("std_dep_delay"),
             F.percentile_approx("DepDelay", 0.95).alias("p95_dep_delay"),
-            F.avg("ArrDelay").alias("avg_arr_delay"),
+            F.avg("origin_congestion_2h").alias("avg_congestion"),
         )
         .collect()
     )
@@ -92,8 +92,8 @@ def _bench_sort(spark: SparkSession, parquet_path: str, rows: int) -> float:
     df = spark.read.parquet(parquet_path).limit(rows)
     start = time.perf_counter()
     _ = (
-        df.orderBy("scheduled_departure_utc", "Origin", "flight_key")
-        .select("flight_key", "Origin", "scheduled_departure_utc", "DepDelay")
+        df.orderBy("FlightDate", "Origin", "flight_key")
+        .select("flight_key", "Origin", "FlightDate", "DepDelay")
         .collect()
     )
     return time.perf_counter() - start
@@ -114,7 +114,7 @@ def _bench_join(spark: SparkSession, parquet_path: str, rows: int) -> float:
     df_b = df.select(
         F.col("Origin").alias("orig_b"),
         F.col("scheduled_month").alias("month_b"),
-        F.col("ArrDelay").alias("arr_b"),
+        F.col("DepDelay").alias("dep_b"),
         F.col("flight_key").alias("key_b"),
     )
     start = time.perf_counter()
@@ -122,7 +122,7 @@ def _bench_join(spark: SparkSession, parquet_path: str, rows: int) -> float:
         df_a.join(df_b,
                   (df_a.orig_a == df_b.orig_b) & (df_a.month_a == df_b.month_b),
                   "inner")
-        .agg(F.count("*"), F.avg("dep_a"), F.avg("arr_b"))
+        .agg(F.count("*"), F.avg("dep_a"), F.avg("dep_b"))
         .collect()
     )
     return time.perf_counter() - start
@@ -196,7 +196,7 @@ def run_cluster_benchmarks(
     spark = _create_cluster_spark(master_url)
     logger.info(
         "Connected. Executors: %d",
-        len(spark.sparkContext._jsc.sc().getExecutorMemoryStatus()),
+        spark.sparkContext._jsc.sc().getExecutorMemoryStatus().size(),
     )
 
     workloads = {
@@ -213,7 +213,9 @@ def run_cluster_benchmarks(
             try:
                 elapsed = wl_fn(spark, parquet_path, rows)
             except Exception as exc:
-                logger.error("Workload %s failed for rows=%d: %s", wl_name, rows, exc)
+                import traceback
+                logger.error("Workload %s failed for rows=%d: %s\n%s",
+                             wl_name, rows, exc, traceback.format_exc())
                 elapsed = float("nan")
 
             results.append({"Workload": wl_name, "Rows": rows, "Time_Sec": round(elapsed, 3)})

@@ -50,13 +50,6 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 _get_prob1 = F.udf(lambda v: float(v[1]), T.DoubleType())
 
-# ---------------------------------------------------------------------------
-# Shared evaluators
-# ---------------------------------------------------------------------------
-_eval_mae  = RegressionEvaluator(metricName="mae")
-_eval_rmse = RegressionEvaluator(metricName="rmse")
-_eval_r2   = RegressionEvaluator(metricName="r2")
-
 # Name of the on-the-fly binary label column
 _CLS_LABEL = "delay_positive"
 
@@ -128,9 +121,9 @@ def _run_single_task(
         .withColumn("final_prediction", F.col("p_delayed") * F.col("raw_pred_delay"))
     )
 
-    two_stage_mae  = _eval_mae.setLabelCol(raw_target).setPredictionCol("final_prediction").evaluate(final)
-    two_stage_rmse = _eval_rmse.setLabelCol(raw_target).setPredictionCol("final_prediction").evaluate(final)
-    two_stage_r2   = _eval_r2.setLabelCol(raw_target).setPredictionCol("final_prediction").evaluate(final)
+    two_stage_mae  = RegressionEvaluator(metricName="mae",  labelCol=raw_target, predictionCol="final_prediction").evaluate(final)
+    two_stage_rmse = RegressionEvaluator(metricName="rmse", labelCol=raw_target, predictionCol="final_prediction").evaluate(final)
+    two_stage_r2   = RegressionEvaluator(metricName="r2",   labelCol=raw_target, predictionCol="final_prediction").evaluate(final)
 
     train_data.unpersist()
     test_data.unpersist()

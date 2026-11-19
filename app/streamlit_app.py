@@ -76,17 +76,23 @@ def load_models():
             .master("local[2]")
             .config("spark.driver.memory", "2g")
             .config("spark.sql.shuffle.partitions", "4")
+            # Security: disable the Spark UI so port 4040 is not opened.
+            # The UI would otherwise bind to all interfaces and expose job
+            # details, config, and local paths to anyone on the network.
+            .config("spark.ui.enabled", "false")
+            .config("spark.driver.bindAddress", "127.0.0.1")
+            .config("spark.driver.host", "127.0.0.1")
             .getOrCreate()
         )
         spark.sparkContext.setLogLevel("ERROR")
 
-        clf_path = PATHS["models"] / "hurdle_departure_full_classifier"
-        reg_path = PATHS["models"] / "hurdle_departure_full_regressor"
+        clf_path = PATHS["models"] / "hurdle_departure_bts_weather_classifier"
+        reg_path = PATHS["models"] / "hurdle_departure_bts_weather_regressor"
 
-        # Fall back to weather-only or legacy naming
+        # Fall back to legacy naming if bts_weather model not found
         if not clf_path.exists():
-            clf_path = PATHS["models"] / "hurdle_departure_bts_weather_classifier"
-            reg_path = PATHS["models"] / "hurdle_departure_bts_weather_regressor"
+            clf_path = PATHS["models"] / "hurdle_departure_full_classifier"
+            reg_path = PATHS["models"] / "hurdle_departure_full_regressor"
         if not clf_path.exists():
             clf_path = PATHS["models"] / "hurdle_departure_classifier"
             reg_path = PATHS["models"] / "hurdle_departure_regressor"
@@ -99,7 +105,11 @@ def load_models():
         return spark, clf_model, reg_model
 
     except Exception as exc:
-        st.error(f"Failed to load models: {exc}")
+        # Log full detail internally; show a generic message to the user
+        # to avoid leaking internal paths or stack traces via the UI.
+        import logging as _logging
+        _logging.getLogger(__name__).exception("Failed to load models")
+        st.error("Failed to load models — check logs/pipeline.log for details.")
         return None, None, None
 
 
@@ -276,7 +286,9 @@ def main():
                     )
 
             except Exception as exc:
-                st.error(f"Prediction failed: {exc}")
+                import logging as _logging
+                _logging.getLogger(__name__).exception("Prediction failed")
+                st.error("Prediction failed — check logs/pipeline.log for details.")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ data/raw/
 data/interim/
 data/processed/
 data/features/
+data/*
 /models/
 logs/
 benchmarks_output/

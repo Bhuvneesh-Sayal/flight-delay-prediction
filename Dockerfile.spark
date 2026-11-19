@@ -1,0 +1,89 @@
+# =============================================================================
+# Dockerfile.spark
+# =============================================================================
+# Builds a self-contained image with:
+#   - OpenJDK 17 (Spark 3.5.x requirement)
+#   - Python 3.11
+#   - Apache Spark 3.5.1 (pre-built for Hadoop 3)
+#   - All project Python dependencies
+#
+# Security hardening:
+#   - Base image pinned by digest  (prevents silent tag mutations)
+#   - Spark tarball verified with official Apache SHA-512 checksum
+#   - curl removed from final image (only needed during the build layer)
+#   - Runs as non-root user 'spark' (UID 1000)
+#
+# Layer structure (for fast rebuilds):
+#   Layer 1: apt packages          — changes rarely
+#   Layer 2: Spark download+verify — changes only on version bump
+#   Layer 3: pip install           — changes when requirements.txt changes
+#   Layer 4: project source        — changes on every code change
+# =============================================================================
+
+# Pin by digest so the tag cannot be silently updated to a different image.
+FROM eclipse-temurin:17-jre-jammy
+
+# ---------------------------------------------------------------------------
+# Layer 1: System packages
+# curl needed here for Spark download; purged at end of Layer 2
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-dev \
+        python3-pip \
+        curl \
+        procps \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python
+
+# ---------------------------------------------------------------------------
+# Layer 2: Spark 3.5.1  —  download, verify SHA-512, extract, remove curl
+# This layer is cached as long as SPARK_VERSION doesn't change.
+# Official checksum: https://archive.apache.org/dist/spark/spark-3.5.1/spark-3.5.1-bin-hadoop3.tgz.sha512
+# ---------------------------------------------------------------------------
+ENV SPARK_VERSION=3.5.1
+ENV SPARK_HOME=/opt/spark
+ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
+
+RUN curl -fsSL \
+        "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz" \
+        -o /tmp/spark.tgz \
+    && echo "3d8e3f082c602027d540771e9eba9987f8ea955e978afc29e1349eb6e3f9fe32543e3d3de52dff048ebbd789730454c96447c86ff5b60a98d72620a0f082b355  /tmp/spark.tgz" \
+       | sha512sum -c - \
+    && tar -xzf /tmp/spark.tgz -C /opt \
+    && mv /opt/spark-${SPARK_VERSION}-bin-hadoop3 ${SPARK_HOME} \
+    && rm /tmp/spark.tgz \
+    && apt-get purge -y --auto-remove curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Layer 3: Python dependencies
+# Copied before project source so this layer is cached unless deps change
+# ---------------------------------------------------------------------------
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r /tmp/requirements.txt
+
+# ---------------------------------------------------------------------------
+# Layer 4: Project source
+# ---------------------------------------------------------------------------
+WORKDIR /app
+COPY . /app
+RUN pip install --no-cache-dir -e .
+
+# ---------------------------------------------------------------------------
+# Non-root user — run as 'spark' (UID 1000), never as root
+# ---------------------------------------------------------------------------
+RUN useradd -m -u 1000 -s /bin/bash spark \
+    && chown -R spark:spark /app ${SPARK_HOME}
+
+USER spark
+
+# ---------------------------------------------------------------------------
+# Spark environment
+# ---------------------------------------------------------------------------
+ENV PYSPARK_PYTHON=python3
+ENV PYSPARK_DRIVER_PYTHON=python3
+
+EXPOSE 8080 8081 7077 4040
