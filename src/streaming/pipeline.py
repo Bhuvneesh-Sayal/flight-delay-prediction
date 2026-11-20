@@ -49,7 +49,7 @@ import pyspark.sql.types as T
 from pyspark.ml import PipelineModel
 from pyspark.sql import DataFrame, SparkSession
 
-from config.settings import PATHS, SPARK_CONFIG, WEATHER_FEATURE_COLS, YEAR
+from config.settings import PATHS, YEAR
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -167,7 +167,7 @@ def _make_batch_processor(
 
         logger.info("Processing streaming batch %d (%d rows)", batch_id, batch_df.count())
 
-        # 1. As-of weather join  [T-6h, T-2h]
+        # 1. As-of weather join  [T-8h, T-2h]
         t_minus_2 = F.col("event_time") - F.expr("INTERVAL 2 HOURS")
         t_minus_8 = F.col("event_time") - F.expr("INTERVAL 8 HOURS")
 
@@ -191,9 +191,14 @@ def _make_batch_processor(
             joined
             .withColumn("weather_available",    F.col("w_time_utc").isNotNull().cast("int"))
             .withColumn("weather_age_minutes",
-                (t_minus_2.cast("long") - F.col("w_time_utc").cast("long")) / 60.0)
-            .withColumn("weather_crosswind",    F.abs(F.col("w_wspeed") * F.sin(wind_diff)))
-            .withColumn("weather_headwind",     F.col("w_wspeed") * F.cos(wind_diff))
+                F.coalesce(
+                    (t_minus_2.cast("long") - F.col("w_time_utc").cast("long")) / 60.0,
+                    F.lit(0.0),
+                ))
+            .withColumn("weather_crosswind",
+                F.coalesce(F.abs(F.col("w_wspeed") * F.sin(wind_diff)), F.lit(0.0)))
+            .withColumn("weather_headwind",
+                F.coalesce(F.col("w_wspeed") * F.cos(wind_diff), F.lit(0.0)))
             .withColumn("weather_icing_risk",
                 F.when((F.col("w_temp") <= 0.0) &
                        ((F.col("w_temp") - F.col("w_dew")) <= 2.0), 1.0).otherwise(0.0))

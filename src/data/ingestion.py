@@ -186,11 +186,13 @@ def ingest_bts(
         get_or_download(f"{bts_base_url}/{zip_name}", zip_dest, min_bytes=50_000)
 
         if not csv_dest.exists() or csv_dest.stat().st_size < 1_000:
+            csv_part = csv_dest.with_suffix(".csv.part")
             with zipfile.ZipFile(zip_dest) as zf:
                 csv_members = [n for n in zf.namelist() if n.lower().endswith(".csv")]
                 member = max(csv_members, key=lambda n: zf.getinfo(n).file_size)
-                with zf.open(member) as src, open(csv_dest, "wb") as dst:
+                with zf.open(member) as src, open(csv_part, "wb") as dst:
                     shutil.copyfileobj(src, dst)
+            csv_part.replace(csv_dest)
 
         bts_csv_files.append(str(csv_dest))
         logger.info("Validated BTS %d-%02d", year, month)
@@ -340,9 +342,17 @@ def _discover_cached(
     airport_stations: dict = AIRPORT_STATIONS,
 ) -> tuple:
     """
-    Discover already-downloaded BTS CSVs and NOAA PSVs on disk.
-    Used when `--steps prep` is run without `--steps ingest` in the same session.
-    Raises FileNotFoundError if any expected file is missing.
+    Discover already-downloaded BTS CSVs, NOAA PSVs, storm events CSV,
+    and holidays JSON on disk.
+
+    Used when ``--steps prep`` is run without ``--steps ingest`` in the
+    same session.  Raises FileNotFoundError if any *required* file (BTS,
+    NOAA) is missing.  Storm events and holidays are optional — returns
+    None for each if not found.
+
+    Returns
+    -------
+    (bts_csv_files, noaa_paths_map, storm_csv_path, holidays_json_path)
     """
     bts_csv_files = []
     for month in range(1, 13):
@@ -362,9 +372,21 @@ def _discover_cached(
             )
         noaa_paths_map[airport] = psv_path
 
-    logger.info("Discovered %d BTS CSVs and %d NOAA PSVs on disk.",
-                len(bts_csv_files), len(noaa_paths_map))
-    return bts_csv_files, noaa_paths_map
+    # Optional data sources — return None when not present on disk
+    storm_csv_path = paths["storms_raw"] / f"storm_events_{year}.csv"
+    if not storm_csv_path.exists() or storm_csv_path.stat().st_size < 10_000:
+        storm_csv_path = None
+
+    holidays_json_path = paths["processed"] / f"us_holidays_{year}.json"
+    if not holidays_json_path.exists() or holidays_json_path.stat().st_size < 50:
+        holidays_json_path = None
+
+    logger.info(
+        "Discovered %d BTS CSVs, %d NOAA PSVs, storm=%s, holidays=%s on disk.",
+        len(bts_csv_files), len(noaa_paths_map),
+        storm_csv_path is not None, holidays_json_path is not None,
+    )
+    return bts_csv_files, noaa_paths_map, storm_csv_path, holidays_json_path
 
 
 def run_ingestion(

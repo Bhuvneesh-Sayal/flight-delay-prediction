@@ -13,7 +13,7 @@ Steps (in order)
     ingest        Download BTS + NOAA raw data
     prep          Clean flights and standardise weather
     features      Feature engineering (UTC, congestion, weather join, labels)
-    ablation      Controlled ablation experiment (12 models, includes baseline)
+    ablation      Controlled ablation experiment (18 models, includes baseline)
     hurdle        Two-stage hurdle model
     analysis      Feature importances + residual diagnostic plots
     benchmarks    Strong + weak scaling benchmarks (local, simulated cores)
@@ -106,7 +106,7 @@ def _run(steps: list) -> None:
     # If ingest was skipped but prep is requested, discover files already on disk
     if "prep" in steps and bts_csv_files is None:
         from src.data.ingestion import _discover_cached
-        bts_csv_files, noaa_paths = _discover_cached()
+        bts_csv_files, noaa_paths, storm_csv, _holidays = _discover_cached()
 
     # ── Step 2: Preprocess ─────────────────────────────────────────────────
     if "prep" in steps:

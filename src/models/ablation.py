@@ -4,11 +4,11 @@ src/models/ablation.py
 Controlled ablation experiment runner.
 
 Trains three regression algorithms (LinearRegression, RandomForest, GBT)
-across two feature conditions (bts_only, bts_weather) and two prediction
-targets (departure delay, arrival delay), plus a train-mean baseline for
-each target.
+across three feature conditions (bts_only, bts_weather, full) and two
+prediction targets (departure delay, arrival delay), plus a train-mean
+baseline for each target.
 
-Each algorithm is tuned with k-fold CrossValidator over a parameter grid
+Each algorithm is tuned with TrainValidationSplit over a parameter grid
 (see LR_PARAM_GRID / RF_PARAM_GRID / GBT_PARAM_GRID in config.settings) and
 the best model is evaluated on both the test and validation partitions and
 saved to disk.
@@ -23,13 +23,12 @@ Public API
 import pandas as pd
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.regression import GBTRegressor, LinearRegression, RandomForestRegressor
-from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
+from pyspark.ml.tuning import ParamGridBuilder, TrainValidationSplit
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from config.settings import (
     BTS_FEATURE_COLS,
-    CV_FOLDS,
     FULL_FEATURE_COLS,
     GBT_PARAM_GRID,
     GBT_PARAMS,
@@ -167,25 +166,32 @@ def run_ablation(
                 pipe = build_pipeline(p_cols, estimator, df=train_df)
                 grid = _build_param_grid(estimator, param_grid)
 
-                cv = CrossValidator(
+                # Use TrainValidationSplit instead of CrossValidator to
+                # respect the chronological ordering.  Spark's TVS does a
+                # single random split, but we combine train + val and set
+                # trainRatio = 8/10 (≈ the Jan-Aug / Sep-Oct boundary) so
+                # the held-out 20 % approximates the temporal validation
+                # set without shuffling future data into training folds.
+                train_val_df = train_df.union(val_df)
+                tvs = TrainValidationSplit(
                     estimator=pipe,
                     estimatorParamMaps=grid,
                     evaluator=RegressionEvaluator(
                         labelCol=target_col, metricName="mae"
                     ),
-                    numFolds=CV_FOLDS,
+                    trainRatio=0.8,
                     seed=42,
                 )
-                cv_model = cv.fit(train_df)
-                model = cv_model.bestModel
+                tvs_model = tvs.fit(train_val_df)
+                model = tvs_model.bestModel
 
                 best_idx = min(
-                    range(len(cv_model.avgMetrics)),
-                    key=lambda i: cv_model.avgMetrics[i],
+                    range(len(tvs_model.validationMetrics)),
+                    key=lambda i: tvs_model.validationMetrics[i],
                 )
                 logger.info(
-                    "    best CV MAE=%.3f params=%s",
-                    cv_model.avgMetrics[best_idx],
+                    "    best TVS MAE=%.3f params=%s",
+                    tvs_model.validationMetrics[best_idx],
                     {p.name: v for p, v in grid[best_idx].items()},
                 )
 

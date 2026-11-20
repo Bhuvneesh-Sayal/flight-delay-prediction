@@ -80,13 +80,17 @@ def load_models():
         )
         spark.sparkContext.setLogLevel("ERROR")
 
-        clf_path = PATHS["models"] / "hurdle_departure_full_classifier"
-        reg_path = PATHS["models"] / "hurdle_departure_full_regressor"
+        clf_path = PATHS["models"] / "hurdle_departure_bts_weather_classifier"
+        reg_path = PATHS["models"] / "hurdle_departure_bts_weather_regressor"
 
-        # Fall back to weather-only or legacy naming
+        # Fall back to full-condition or legacy naming.
+        # NOTE: we prefer bts_weather because _build_input_row only constructs
+        # weather-level features (20 cols).  The full-condition model expects
+        # 14 extra columns (delay-cause aggregates, storm, holiday) that the
+        # Streamlit UI cannot provide, so loading it would crash at transform.
         if not clf_path.exists():
-            clf_path = PATHS["models"] / "hurdle_departure_bts_weather_classifier"
-            reg_path = PATHS["models"] / "hurdle_departure_bts_weather_regressor"
+            clf_path = PATHS["models"] / "hurdle_departure_full_classifier"
+            reg_path = PATHS["models"] / "hurdle_departure_full_regressor"
         if not clf_path.exists():
             clf_path = PATHS["models"] / "hurdle_departure_classifier"
             reg_path = PATHS["models"] / "hurdle_departure_regressor"

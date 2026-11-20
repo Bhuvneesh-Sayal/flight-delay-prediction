@@ -8,7 +8,7 @@ Steps
 1. UTC conversion of scheduled departure times (local timezone → UTC)
 2. Rolling 2-hour airport departure congestion window
 3. Prior-leg aircraft rotation delay (lag over tail number)
-4. As-of weather join [T-6h, T-2h]
+4. As-of weather join [T-8h, T-2h]
 5. Aviation feature decompositions (crosswind, headwind, icing, IFR)
 6. Two-stage hurdle labels (DEP_DEL15 / ARR_DEL15, log transforms)
 7. Chronological data-split column
@@ -32,7 +32,6 @@ from pyspark.sql.window import Window
 
 from config.settings import (
     AIRPORT_RUNWAYS,
-    AIRPORT_STATIONS,
     BTS_FEATURE_COLS,
     FULL_FEATURE_COLS,
     MIN_WEATHER_COVERAGE,
@@ -116,18 +115,28 @@ def _add_operational_features(spark: SparkSession, flights) -> object:
         tail_win = Window.partitionBy("Tail_Number").orderBy("scheduled_departure_utc")
         flights = (
             flights
-            .withColumn("prev_arr_delay", F.lag("ArrDelay", 1).over(tail_win))
-            .withColumn("prev_dep_utc",   F.lag("scheduled_departure_utc", 1).over(tail_win))
+            .withColumn("prev_arr_delay",    F.lag("ArrDelay", 1).over(tail_win))
+            .withColumn("prev_dep_utc",      F.lag("scheduled_departure_utc", 1).over(tail_win))
+            .withColumn("prev_elapsed_min",  F.lag("CRSElapsedTime", 1).over(tail_win))
+            # Estimated arrival = previous scheduled departure + scheduled flight time
+            .withColumn(
+                "prev_est_arrival_utc",
+                F.col("prev_dep_utc") + F.coalesce(F.col("prev_elapsed_min"), F.lit(0.0))
+                    * F.expr("INTERVAL 1 MINUTE"),
+            )
             .withColumn(
                 "prior_leg_delay",
                 F.when(
                     F.col("prev_dep_utc").isNotNull() &
-                    (F.col("prev_dep_utc") <= F.col("t_minus_2_utc")) &
-                    # Leakage guard: never use same-flight or future data
+                    # Leakage guard: the previous flight must have *arrived*
+                    # by T-2h (current flight's decision point) for its
+                    # ArrDelay to be observable.
+                    (F.col("prev_est_arrival_utc") <= F.col("t_minus_2_utc")) &
                     (F.col("prev_dep_utc") < F.col("scheduled_departure_utc")),
                     F.coalesce(F.col("prev_arr_delay"), F.lit(0.0)),
                 ).otherwise(0.0),
             )
+            .drop("prev_elapsed_min", "prev_est_arrival_utc")
         )
     else:
         flights = flights.withColumn("prior_leg_delay", F.lit(0.0))
@@ -243,20 +252,28 @@ def _report_weather_coverage(flights, min_coverage: float = MIN_WEATHER_COVERAGE
 def _add_delay_cause_aggregates(flights) -> object:
     """
     For each flight, compute same-day prior-flight delay-cause aggregates
-    at the origin airport.  Only flights with ``scheduled_departure_utc``
-    strictly BEFORE the current flight are included — no target leakage.
+    at the origin airport.
+
+    Only flights whose ``scheduled_departure_utc`` is at least 2 hours
+    before the current flight are included.  At T-2 h the earlier flight's
+    outcome (delayed or not, delay-cause breakdown) is realistically
+    observable, so no future information leaks into the features.
 
     Uses BTS delay-cause columns (CarrierDelay, WeatherDelay, NASDelay,
     SecurityDelay, LateAircraftDelay) that we already download.
     """
     dep_sec = F.col("scheduled_departure_utc").cast("long")
 
-    # Window: same Origin + same calendar date, ordered by departure time,
-    # all rows BEFORE the current row (excluding current row).
+    # Window: same Origin, ordered by departure time (seconds).
+    # rangeBetween(-86400, -7200) means:
+    #   • only rows whose dep_sec is between 24h and 2h before this row
+    #   • the -7200 upper bound ensures the included flights departed
+    #     at least 2 h before the current flight — long enough for
+    #     their outcome to be known (no information leakage).
     day_prior = (
-        Window.partitionBy("Origin", F.to_date("scheduled_departure_utc"))
+        Window.partitionBy("Origin")
         .orderBy(dep_sec)
-        .rowsBetween(Window.unboundedPreceding, -1)
+        .rangeBetween(-86400, -7200)
     )
 
     result = (
@@ -550,5 +567,13 @@ def run_feature_engineering(
     """
     logger.info("=== Feature Engineering ===")
     features_df = build_features(spark, flights_df, weather_parquet_path, paths=paths)
+
+    # Materialise once so save_feature_sets doesn't re-execute the full DAG
+    # for each of the 6 feature-set writes.
+    features_df = features_df.cache()
+    cached_count = features_df.count()
+    logger.info("Features cached: %s rows", f"{cached_count:,}")
+
     save_feature_sets(features_df, paths=paths)
+    features_df.unpersist()
     return features_df
