@@ -257,8 +257,22 @@ WEAK_SCALE_ROWS_PER_CORE: int = 100_000
 
 # Spark standalone cluster URL (used when running inside Docker)
 # Override via SPARK_MASTER_URL environment variable in production.
+# Validated against a strict allowlist pattern to prevent redirection
+# to a rogue master via environment manipulation.
 import os as _os
-CLUSTER_MASTER_URL: str = _os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077")
+import re as _re
+
+_raw_master_url: str = _os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077")
+_MASTER_URL_PATTERN = _re.compile(
+    r"^spark://[a-zA-Z0-9._-]+(:\d{1,5})?$"
+)
+if not _MASTER_URL_PATTERN.match(_raw_master_url):
+    raise ValueError(
+        f"SPARK_MASTER_URL '{_raw_master_url}' does not match the expected "
+        "pattern 'spark://<host>[:<port>]'. "
+        "Set a valid value or unset the environment variable."
+    )
+CLUSTER_MASTER_URL: str = _raw_master_url
 
 # ---------------------------------------------------------------------------
 # Structured Streaming settings
@@ -268,3 +282,21 @@ STREAMING_TRIGGER_SECONDS:   int = 30      # micro-batch interval
 STREAMING_INPUT_DIR:  Path = PROJECT_DIR / "data" / "streaming" / "input"  / "flights"
 STREAMING_OUTPUT_DIR: Path = PROJECT_DIR / "data" / "streaming" / "output" / "scores"
 STREAMING_CHECKPOINT: Path = PROJECT_DIR / "data" / "streaming" / "checkpoints"
+
+# ---------------------------------------------------------------------------
+# Kafka settings  (KRaft mode — no Zookeeper)
+# ---------------------------------------------------------------------------
+# Bootstrap server used by both the Python producer and the Spark consumer.
+# Outside Docker (local dev): localhost:9092
+# Inside Docker Compose (Spark driver talks to kafka service): kafka:9092
+KAFKA_BOOTSTRAP_SERVERS: str = _os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+
+# Topic the producer publishes flight events to and Spark reads from
+KAFKA_FLIGHT_TOPIC: str  = "flight-events"
+
+# Topic Spark writes scored predictions to
+KAFKA_SCORES_TOPIC: str  = "delay-predictions"
+
+# Spark SQL Kafka connector Maven coordinate.
+# Must match the PySpark major version (4.0.x) and Scala version (2.13 for PySpark 4.x).
+KAFKA_SPARK_PACKAGE: str = "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0"

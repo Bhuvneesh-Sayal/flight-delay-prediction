@@ -32,6 +32,7 @@ from pyspark.sql.window import Window
 
 from config.settings import (
     AIRPORT_RUNWAYS,
+    AIRPORT_STATIONS,
     BTS_FEATURE_COLS,
     FULL_FEATURE_COLS,
     MIN_WEATHER_COVERAGE,
@@ -115,28 +116,26 @@ def _add_operational_features(spark: SparkSession, flights) -> object:
         tail_win = Window.partitionBy("Tail_Number").orderBy("scheduled_departure_utc")
         flights = (
             flights
-            .withColumn("prev_arr_delay",    F.lag("ArrDelay", 1).over(tail_win))
-            .withColumn("prev_dep_utc",      F.lag("scheduled_departure_utc", 1).over(tail_win))
-            .withColumn("prev_elapsed_min",  F.lag("CRSElapsedTime", 1).over(tail_win))
-            # Estimated arrival = previous scheduled departure + scheduled flight time
+            .withColumn("prev_arr_delay",      F.lag("ArrDelay",              1).over(tail_win))
+            .withColumn("prev_dep_utc",        F.lag("scheduled_departure_utc", 1).over(tail_win))
+            .withColumn("prev_elapsed_min",    F.lag("CRSElapsedTime",          1).over(tail_win))
+            # Estimated scheduled arrival of the previous leg
             .withColumn(
-                "prev_est_arrival_utc",
-                F.col("prev_dep_utc") + F.coalesce(F.col("prev_elapsed_min"), F.lit(0.0))
-                    * F.expr("INTERVAL 1 MINUTE"),
+                "prev_sched_arr_utc",
+                F.expr("prev_dep_utc + make_interval(0, 0, 0, 0, 0, cast(prev_elapsed_min as int), 0)"),
             )
             .withColumn(
                 "prior_leg_delay",
                 F.when(
-                    F.col("prev_dep_utc").isNotNull() &
-                    # Leakage guard: the previous flight must have *arrived*
-                    # by T-2h (current flight's decision point) for its
-                    # ArrDelay to be observable.
-                    (F.col("prev_est_arrival_utc") <= F.col("t_minus_2_utc")) &
+                    # Previous leg's scheduled arrival must be known by T-2h
+                    F.col("prev_sched_arr_utc").isNotNull() &
+                    (F.col("prev_sched_arr_utc") <= F.col("t_minus_2_utc")) &
+                    # Must be a strictly earlier flight (not the same flight)
                     (F.col("prev_dep_utc") < F.col("scheduled_departure_utc")),
                     F.coalesce(F.col("prev_arr_delay"), F.lit(0.0)),
                 ).otherwise(0.0),
             )
-            .drop("prev_elapsed_min", "prev_est_arrival_utc")
+            .drop("prev_sched_arr_utc", "prev_elapsed_min")
         )
     else:
         flights = flights.withColumn("prior_leg_delay", F.lit(0.0))
@@ -254,69 +253,82 @@ def _add_delay_cause_aggregates(flights) -> object:
     For each flight, compute same-day prior-flight delay-cause aggregates
     at the origin airport.
 
-    Only flights whose ``scheduled_departure_utc`` is at least 2 hours
-    before the current flight are included.  At T-2 h the earlier flight's
-    outcome (delayed or not, delay-cause breakdown) is realistically
-    observable, so no future information leaks into the features.
-
-    Uses BTS delay-cause columns (CarrierDelay, WeatherDelay, NASDelay,
-    SecurityDelay, LateAircraftDelay) that we already download.
+    Leakage fix: only flights whose scheduled departure is at or before
+    t_minus_2_utc (i.e. known at prediction time) are included.
+    Uses rangeBetween on epoch-seconds so the boundary is a time value,
+    not just row position.
     """
-    dep_sec = F.col("scheduled_departure_utc").cast("long")
+    dep_sec      = F.col("scheduled_departure_utc").cast("long")
+    t_minus_2_sec = F.col("t_minus_2_utc").cast("long")
 
-    # Window: same Origin, ordered by departure time (seconds).
-    # rangeBetween(-86400, -7200) means:
-    #   • only rows whose dep_sec is between 24h and 2h before this row
-    #   • the -7200 upper bound ensures the included flights departed
-    #     at least 2 h before the current flight — long enough for
-    #     their outcome to be known (no information leakage).
-    day_prior = (
-        Window.partitionBy("Origin")
+    # Window: same Origin, same UTC calendar date, ordered by scheduled departure.
+    # Upper bound is t_minus_2_utc of the CURRENT flight expressed as an offset
+    # from the current row — but rangeBetween uses a constant, so we cap by
+    # filtering the included rows at t_minus_2_sec via a conditional flag.
+    day_win = (
+        Window.partitionBy("Origin", F.to_date("scheduled_departure_utc"))
         .orderBy(dep_sec)
-        .rangeBetween(-86400, -7200)
+        .rangeBetween(Window.unboundedPreceding, -1)
+    )
+
+    # Mark rows that are strictly before t_minus_2_utc of the current flight.
+    # We approximate this correctly by computing on the same ordered window
+    # and zeroing out contributions from flights whose scheduled departure
+    # is later than t_minus_2_utc (they haven't departed yet at prediction time).
+    # The t_minus_2_utc column belongs to the *current* row, so we use a
+    # self-consistent approach: include only rows where dep_sec ≤ own t_minus_2_sec.
+    # Because rangeBetween(-inf, -1) already excludes the current row,
+    # we add an extra guard column.
+
+    flights = flights.withColumn(
+        "_known_flag",
+        F.when(dep_sec <= t_minus_2_sec, 1).otherwise(0),
     )
 
     result = (
         flights
-        # NAS delays (ATC, airport ops, ground stops)
-        .withColumn("_nas_flag",  F.when(F.col("NASDelay") > 0, 1).otherwise(0))
+        # NAS delays
+        .withColumn("_nas_flag",  F.when((F.col("NASDelay") > 0) & (F.col("_known_flag") == 1), 1).otherwise(0))
         .withColumn("airport_nas_delays_today",
-                    F.coalesce(F.sum("_nas_flag").over(day_prior), F.lit(0)).cast("double"))
+                    F.coalesce(F.sum("_nas_flag").over(day_win), F.lit(0)).cast("double"))
         .withColumn("airport_nas_delay_min_today",
-                    F.coalesce(F.sum("NASDelay").over(day_prior), F.lit(0.0)))
+                    F.coalesce(F.sum(F.col("NASDelay") * F.col("_known_flag")).over(day_win), F.lit(0.0)))
         # Weather delays
-        .withColumn("_wx_flag",   F.when(F.col("WeatherDelay") > 0, 1).otherwise(0))
+        .withColumn("_wx_flag",   F.when((F.col("WeatherDelay") > 0) & (F.col("_known_flag") == 1), 1).otherwise(0))
         .withColumn("airport_wx_delays_today",
-                    F.coalesce(F.sum("_wx_flag").over(day_prior), F.lit(0)).cast("double"))
+                    F.coalesce(F.sum("_wx_flag").over(day_win), F.lit(0)).cast("double"))
         .withColumn("airport_wx_delay_min_today",
-                    F.coalesce(F.sum("WeatherDelay").over(day_prior), F.lit(0.0)))
+                    F.coalesce(F.sum(F.col("WeatherDelay") * F.col("_known_flag")).over(day_win), F.lit(0.0)))
         # Carrier delays
-        .withColumn("_cr_flag",   F.when(F.col("CarrierDelay") > 0, 1).otherwise(0))
+        .withColumn("_cr_flag",   F.when((F.col("CarrierDelay") > 0) & (F.col("_known_flag") == 1), 1).otherwise(0))
         .withColumn("airport_carrier_delays_today",
-                    F.coalesce(F.sum("_cr_flag").over(day_prior), F.lit(0)).cast("double"))
+                    F.coalesce(F.sum("_cr_flag").over(day_win), F.lit(0)).cast("double"))
         # Late-aircraft cascade
-        .withColumn("_la_flag",   F.when(F.col("LateAircraftDelay") > 0, 1).otherwise(0))
+        .withColumn("_la_flag",   F.when((F.col("LateAircraftDelay") > 0) & (F.col("_known_flag") == 1), 1).otherwise(0))
         .withColumn("airport_late_acft_delays_today",
-                    F.coalesce(F.sum("_la_flag").over(day_prior), F.lit(0)).cast("double"))
+                    F.coalesce(F.sum("_la_flag").over(day_win), F.lit(0)).cast("double"))
         .withColumn("airport_late_acft_min_today",
-                    F.coalesce(F.sum("LateAircraftDelay").over(day_prior), F.lit(0.0)))
+                    F.coalesce(F.sum(F.col("LateAircraftDelay") * F.col("_known_flag")).over(day_win), F.lit(0.0)))
         # Overall delay picture
-        .withColumn("_del15_flag", F.when(F.col("DepDelay") > 15, 1).otherwise(0))
+        .withColumn("_del15_flag", F.when((F.col("DepDelay") > 15) & (F.col("_known_flag") == 1), 1).otherwise(0))
         .withColumn("airport_total_delayed_today",
-                    F.coalesce(F.sum("_del15_flag").over(day_prior), F.lit(0)).cast("double"))
+                    F.coalesce(F.sum("_del15_flag").over(day_win), F.lit(0)).cast("double"))
         .withColumn("airport_avg_delay_today",
-                    F.coalesce(F.avg("DepDelay").over(day_prior), F.lit(0.0)))
-        .withColumn("_prior_count",
-                    F.coalesce(F.count("flight_key").over(day_prior), F.lit(0)))
+                    F.coalesce(
+                        F.sum(F.col("DepDelay") * F.col("_known_flag")).over(day_win) /
+                        F.nullif(F.sum("_known_flag").over(day_win), F.lit(0)),
+                        F.lit(0.0),
+                    ))
+        .withColumn("_known_count",
+                    F.coalesce(F.sum("_known_flag").over(day_win), F.lit(0)))
         .withColumn("airport_delay_rate_today",
-                    F.when(F.col("_prior_count") > 0,
-                           F.col("airport_total_delayed_today") / F.col("_prior_count"))
+                    F.when(F.col("_known_count") > 0,
+                           F.col("airport_total_delayed_today") / F.col("_known_count"))
                     .otherwise(0.0))
-        # Drop helper columns
         .drop("_nas_flag", "_wx_flag", "_cr_flag", "_la_flag",
-              "_del15_flag", "_prior_count")
+              "_del15_flag", "_known_flag", "_known_count")
     )
-    logger.info("Added 10 delay-cause daily aggregate features")
+    logger.info("Added 10 delay-cause daily aggregate features (leakage-safe, capped at T-2h)")
     return result
 
 

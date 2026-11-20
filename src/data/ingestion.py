@@ -23,11 +23,13 @@ Public API
 import hashlib
 import gzip
 import json
+import os
 import re
 import shutil
 import time
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -65,11 +67,41 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _validate_url_scheme(url: str) -> None:
+    """
+    Reject any URL whose scheme is not https.
+
+    file://, ftp://, http://, and data: URLs are blocked to prevent
+    local file reads, unencrypted transfers, or unexpected protocol handlers.
+    """
+    scheme = urlparse(url).scheme
+    if scheme != "https":
+        raise ValueError(
+            f"Refusing to download '{url}': only https:// URLs are allowed "
+            f"(got scheme '{scheme}')."
+        )
+
+
+# Maximum decompressed size for a single ZIP member or gzip file (500 MB).
+# Prevents decompression bombs from exhausting disk space.
+_MAX_DECOMPRESSED_BYTES: int = 500 * 1024 * 1024
+
+
 def _download_once(url: str, dest: Path, temp: Path, min_bytes: int) -> None:
     """Single download attempt. Raises on HTTP error, network error or truncation."""
     try:
         with _session.get(url, stream=True, timeout=(60, 600)) as response:
             response.raise_for_status()
+
+            # Validate Content-Length when the server provides it
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None:
+                declared = int(content_length)
+                if declared < min_bytes:
+                    raise RuntimeError(
+                        f"Server Content-Length {declared} < min_bytes {min_bytes}: {url}"
+                    )
+
             with open(temp, "wb") as fh:
                 for chunk in response.iter_content(chunk_size=1_048_576):
                     if chunk:
@@ -103,6 +135,9 @@ def get_or_download(
 
     Returns the destination Path.
     """
+    # Only https:// URLs are permitted — rejects file://, ftp://, http://, data:
+    _validate_url_scheme(url)
+
     dest = Path(destination)
 
     if dest.exists() and dest.stat().st_size >= min_bytes:
@@ -190,7 +225,14 @@ def ingest_bts(
             with zipfile.ZipFile(zip_dest) as zf:
                 csv_members = [n for n in zf.namelist() if n.lower().endswith(".csv")]
                 member = max(csv_members, key=lambda n: zf.getinfo(n).file_size)
-                with zf.open(member) as src, open(csv_part, "wb") as dst:
+                # Decompression bomb guard: reject members larger than 500 MB
+                member_size = zf.getinfo(member).file_size
+                if member_size > _MAX_DECOMPRESSED_BYTES:
+                    raise RuntimeError(
+                        f"ZIP member '{member}' decompressed size {member_size:,} bytes "
+                        f"exceeds the {_MAX_DECOMPRESSED_BYTES // 1024 // 1024} MB limit."
+                    )
+                with zf.open(member) as src, open(csv_dest, "wb") as dst:
                     shutil.copyfileobj(src, dst)
             csv_part.replace(csv_dest)
 
@@ -276,10 +318,23 @@ def ingest_storm_events(
         logger.warning("Failed to download Storm Events: %s", url)
         return None
 
-    # Decompress .csv.gz → .csv
+    # Decompress .csv.gz → .csv  (with decompression bomb guard)
     logger.info("Decompressing %s…", gz_dest.name)
     with gzip.open(gz_dest, "rb") as f_in, open(dest_csv, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out)
+        total = 0
+        chunk_size = 1_048_576
+        while True:
+            chunk = f_in.read(chunk_size)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _MAX_DECOMPRESSED_BYTES:
+                dest_csv.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"Storm Events gzip exceeds the {_MAX_DECOMPRESSED_BYTES // 1024 // 1024} MB "
+                    "decompression limit — possible decompression bomb."
+                )
+            f_out.write(chunk)
 
     logger.info("Storm Events: %s → %s", gz_dest.name, dest_csv.name)
     return dest_csv
@@ -325,10 +380,14 @@ def ingest_holidays(
 # ---------------------------------------------------------------------------
 
 def save_manifest(paths: dict = PATHS) -> None:
-    """Write the current download_manifest to logs/download_manifest.json."""
+    """Write the current download_manifest to logs/download_manifest.json atomically."""
     out = paths["logs"] / "download_manifest.json"
-    with open(out, "w") as fh:
+    tmp = out.with_suffix(".tmp")
+    # Write to a temp file first; os.replace is atomic on POSIX so a crash
+    # mid-write never leaves a truncated manifest at the final path.
+    with open(tmp, "w") as fh:
         json.dump(download_manifest, fh, indent=2)
+    os.replace(tmp, out)
     logger.info("Download manifest saved → %s", out)
 
 
@@ -342,17 +401,9 @@ def _discover_cached(
     airport_stations: dict = AIRPORT_STATIONS,
 ) -> tuple:
     """
-    Discover already-downloaded BTS CSVs, NOAA PSVs, storm events CSV,
-    and holidays JSON on disk.
-
-    Used when ``--steps prep`` is run without ``--steps ingest`` in the
-    same session.  Raises FileNotFoundError if any *required* file (BTS,
-    NOAA) is missing.  Storm events and holidays are optional — returns
-    None for each if not found.
-
-    Returns
-    -------
-    (bts_csv_files, noaa_paths_map, storm_csv_path, holidays_json_path)
+    Discover already-downloaded BTS CSVs and NOAA PSVs on disk.
+    Used when `--steps prep` is run without `--steps ingest` in the same session.
+    Raises FileNotFoundError if any expected file is missing.
     """
     bts_csv_files = []
     for month in range(1, 13):

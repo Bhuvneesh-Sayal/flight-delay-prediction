@@ -1,0 +1,46 @@
+# =============================================================================
+# .dockerignore
+# =============================================================================
+# Prevents large, sensitive, or irrelevant files from entering the Docker
+# build context.  Missing this file caused .git history, .venv, data/,
+# models/, and any future credential file to be baked into the image.
+# =============================================================================
+
+# Version control
+.git
+.gitignore
+
+# Python virtualenv — image installs its own deps via requirements.txt
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.egg-info
+
+# Large data directories — mounted as volumes at runtime
+data/
+models/
+results/
+logs/
+benchmarks_output/
+artifacts/
+
+# Notebooks (not needed in the container)
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
+
+# Secrets and credentials — never bake into an image
+*.env
+.env*
+*.pem
+*.key
+*.crt
+secrets/
+
+# IDE / OS artefacts
+.idea/
+.vscode/
+.DS_Store
+*.swp

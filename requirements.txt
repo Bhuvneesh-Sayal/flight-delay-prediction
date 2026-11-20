@@ -1,6 +1,6 @@
 # Core Spark stack
 pyspark==4.0.0
-pyarrow==15.0.2
+pyarrow>=15.0,<16.0
 
 # Data / numerics
 pandas>=2.0,<3.0
@@ -18,3 +18,7 @@ matplotlib>=3.8
 
 # Streamlit demo
 streamlit>=1.35
+
+# Kafka producer (BTS replay → Kafka)
+# 2.0.x is the last stable synchronous API; 3.x rewrote to async
+kafka-python==2.0.5
