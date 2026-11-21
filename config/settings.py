@@ -172,18 +172,21 @@ WEATHER_FEATURE_COLS: list = BTS_FEATURE_COLS + [
 # ---------------------------------------------------------------------------
 # Enhanced feature columns — BTS delay-cause aggregates + storms + holidays
 # ---------------------------------------------------------------------------
-# Same-day, prior-flight airport aggregates (no target leakage)
+# Same-day airport delay picture at the origin, as known at T-2h (no leakage).
+# Departure delays count once a flight has actually departed by T-2h;
+# delay-cause minutes count once it has actually landed by T-2h.
 DELAY_AGG_FEATURE_COLS: list = [
-    "airport_nas_delays_today",         # count of prior NAS-delayed flights
-    "airport_nas_delay_min_today",      # sum of NASDelay minutes from prior flights
-    "airport_wx_delays_today",          # count of prior weather-delayed flights
-    "airport_wx_delay_min_today",       # sum of WeatherDelay minutes
-    "airport_carrier_delays_today",     # count of prior carrier-delayed flights
-    "airport_late_acft_delays_today",   # count of prior late-aircraft flights
-    "airport_late_acft_min_today",      # sum of LateAircraftDelay minutes
-    "airport_total_delayed_today",      # count of prior flights with DepDelay > 15
-    "airport_avg_delay_today",          # mean DepDelay of prior flights
-    "airport_delay_rate_today",         # fraction of prior flights delayed > 15 min
+    "airport_nas_delays_today",         # flights landed by T-2h with NAS delay
+    "airport_nas_delay_min_today",      # their NASDelay minutes
+    "airport_wx_delays_today",          # flights landed by T-2h with weather delay
+    "airport_wx_delay_min_today",       # their WeatherDelay minutes
+    "airport_carrier_delays_today",     # flights landed by T-2h with carrier delay
+    "airport_late_acft_delays_today",   # flights landed by T-2h with late-aircraft delay
+    "airport_late_acft_min_today",      # their LateAircraftDelay minutes
+    "airport_total_delayed_today",      # flights departed by T-2h with DepDelay > 15
+    "airport_avg_delay_today",          # mean DepDelay of flights departed by T-2h
+    "airport_delay_rate_today",         # share of those departed > 15 min late
+    "airport_waiting_late_now",         # flights past scheduled departure, not yet left, at T-2h
 ]
 
 # NOAA Storm Events + US holidays
