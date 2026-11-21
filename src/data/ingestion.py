@@ -232,7 +232,7 @@ def ingest_bts(
                         f"ZIP member '{member}' decompressed size {member_size:,} bytes "
                         f"exceeds the {_MAX_DECOMPRESSED_BYTES // 1024 // 1024} MB limit."
                     )
-                with zf.open(member) as src, open(csv_dest, "wb") as dst:
+                with zf.open(member) as src, open(csv_part, "wb") as dst:
                     shutil.copyfileobj(src, dst)
             csv_part.replace(csv_dest)
 

@@ -89,13 +89,16 @@ def clean_flights(
             for f in schema.fields
         ])
 
+    # Spark applies a CSV schema by column *position*, not by header name, and
+    # the BTS files have ~110 columns.  So read everything as strings (no
+    # inferSchema scan), select the needed columns by header name, then cast.
     raw = (
         spark.read
         .option("header", True)
-        .schema(schema)
         .csv(bts_csv_files)
         .select(*keep_cols)
     )
+    raw = raw.select(*[F.col(f.name).cast(f.dataType).alias(f.name) for f in schema.fields])
 
     # Normalise tail-number column name
     if tail_col != "Tail_Number":

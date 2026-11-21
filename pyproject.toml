@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name            = "flight-delay-prediction"
 version         = "0.1.0"
 description     = "Scalable flight delay prediction using PySpark — DA231o project"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license         = {text = "MIT"}
 
 dependencies = [
@@ -19,6 +19,7 @@ dependencies = [
     "requests>=2.31",
     "matplotlib>=3.8",
     "streamlit>=1.35",
+    "kafka-python==2.0.5",
 ]
 
 [project.optional-dependencies]

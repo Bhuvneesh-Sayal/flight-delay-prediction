@@ -51,68 +51,6 @@ logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Lightweight congestion + rotation delay (pure pandas, no Spark needed)
-# ---------------------------------------------------------------------------
-
-def _add_operational_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute origin_congestion_2h and prior_leg_delay purely in pandas.
-    These match the definitions in engineering.py at a per-row level.
-
-    Called once on the full replay DataFrame before the producer loop starts.
-    """
-    # Parse UTC timestamps
-    df = df.copy()
-    df["scheduled_departure_utc"] = pd.to_datetime(
-        df["scheduled_departure_utc"], utc=True, errors="coerce"
-    )
-    df = df.dropna(subset=["scheduled_departure_utc"])
-    df = df.sort_values("scheduled_departure_utc").reset_index(drop=True)
-
-    # --- origin_congestion_2h: count flights from same Origin in [T-2h, T) ---
-    df["_dep_ts"] = df["scheduled_departure_utc"].astype("int64") // 10**9  # epoch seconds
-    congestion = []
-    for idx, row in df.iterrows():
-        window_start = row["_dep_ts"] - 7200  # 2 hours in seconds
-        window_end   = row["_dep_ts"]
-        count = (
-            (df["Origin"] == row["Origin"]) &
-            (df["_dep_ts"] >= window_start) &
-            (df["_dep_ts"] <  window_end)
-        ).sum()
-        congestion.append(int(count))
-    df["origin_congestion_2h"] = congestion
-
-    # --- prior_leg_delay: previous leg arrival delay for same Tail_Number ---
-    # Guard: previous leg's scheduled arrival (dep + CRSElapsedTime) must be
-    # known by T-2h of the current flight.
-    tail_col = "Tail_Number" if "Tail_Number" in df.columns else None
-    if tail_col:
-        df = df.sort_values(["Tail_Number", "scheduled_departure_utc"])
-        df["_prev_dep_ts"]   = df.groupby("Tail_Number")["_dep_ts"].shift(1)
-        df["_prev_elapsed"]  = df.groupby("Tail_Number")["CRSElapsedTime"].shift(1)
-        df["_prev_arr_delay"] = df.groupby("Tail_Number")["ArrDelay"].shift(1)
-
-        df["_prev_sched_arr_ts"] = df["_prev_dep_ts"] + df["_prev_elapsed"] * 60.0
-        t_minus_2_ts = df["_dep_ts"] - 7200
-
-        mask = (
-            df["_prev_sched_arr_ts"].notna() &
-            (df["_prev_sched_arr_ts"] <= t_minus_2_ts) &
-            (df["_prev_dep_ts"] < df["_dep_ts"])
-        )
-        df["prior_leg_delay"] = 0.0
-        df.loc[mask, "prior_leg_delay"] = df.loc[mask, "_prev_arr_delay"].fillna(0.0)
-        df = df.drop(columns=["_prev_dep_ts", "_prev_elapsed", "_prev_arr_delay",
-                               "_prev_sched_arr_ts"])
-    else:
-        df["prior_leg_delay"] = 0.0
-
-    df = df.drop(columns=["_dep_ts"])
-    return df
-
-
-# ---------------------------------------------------------------------------
 # Main producer function
 # ---------------------------------------------------------------------------
 

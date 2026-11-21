@@ -29,6 +29,7 @@ Steps (in order)
 """
 
 import argparse
+import os
 import sys
 
 from config.settings import CLUSTER_MASTER_URL, PATHS, SPARK_CONFIG
@@ -52,7 +53,13 @@ def _create_spark(with_kafka: bool = False):
     import pyspark
     from pyspark.sql import SparkSession
 
-    builder = SparkSession.builder.appName("FlightDelayPrediction").master("local[*]")
+    builder = SparkSession.builder.appName("FlightDelayPrediction")
+    # Under spark-submit, the JVM is already running and spark-submit sets
+    # PYSPARK_GATEWAY_PORT. Leave the master unset there so --master
+    # (e.g. spark://spark-master:7077) takes effect; a master set in code
+    # would override it. Plain `python main.py` still runs in local mode.
+    if "PYSPARK_GATEWAY_PORT" not in os.environ:
+        builder = builder.master("local[*]")
     for k, v in SPARK_CONFIG.items():
         builder = builder.config(k, v)
 

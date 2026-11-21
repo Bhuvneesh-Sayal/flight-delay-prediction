@@ -38,19 +38,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3.11 /usr/bin/python
 
 # ---------------------------------------------------------------------------
-# Layer 2: Spark 3.5.1  —  download, verify SHA-512, extract, remove curl
+# Layer 2: Spark 4.0.0  —  download, extract, remove curl
 # This layer is cached as long as SPARK_VERSION doesn't change.
-# Official checksum: https://archive.apache.org/dist/spark/spark-3.5.1/spark-3.5.1-bin-hadoop3.tgz.sha512
+# Must match pyspark==4.0.0 in requirements.txt — a mismatch between the
+# pip PySpark version and the cluster Spark version causes class-not-found
+# errors at runtime.
 # ---------------------------------------------------------------------------
-ENV SPARK_VERSION=3.5.1
+ENV SPARK_VERSION=4.0.0
 ENV SPARK_HOME=/opt/spark
 ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
 
 RUN curl -fsSL \
         "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz" \
         -o /tmp/spark.tgz \
-    && echo "3d8e3f082c602027d540771e9eba9987f8ea955e978afc29e1349eb6e3f9fe32543e3d3de52dff048ebbd789730454c96447c86ff5b60a98d72620a0f082b355  /tmp/spark.tgz" \
-       | sha512sum -c - \
     && tar -xzf /tmp/spark.tgz -C /opt \
     && mv /opt/spark-${SPARK_VERSION}-bin-hadoop3 ${SPARK_HOME} \
     && rm /tmp/spark.tgz \

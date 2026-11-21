@@ -32,7 +32,6 @@ from pyspark.sql.window import Window
 
 from config.settings import (
     AIRPORT_RUNWAYS,
-    AIRPORT_STATIONS,
     BTS_FEATURE_COLS,
     FULL_FEATURE_COLS,
     MIN_WEATHER_COVERAGE,
@@ -314,9 +313,15 @@ def _add_delay_cause_aggregates(flights) -> object:
         .withColumn("airport_total_delayed_today",
                     F.coalesce(F.sum("_del15_flag").over(day_win), F.lit(0)).cast("double"))
         .withColumn("airport_avg_delay_today",
+                    # F.when guard instead of F.nullif: nullif over a window
+                    # fails to resolve on Spark 3.5, and a bare division by
+                    # zero raises under Spark 4's default ANSI mode.
                     F.coalesce(
-                        F.sum(F.col("DepDelay") * F.col("_known_flag")).over(day_win) /
-                        F.nullif(F.sum("_known_flag").over(day_win), F.lit(0)),
+                        F.when(
+                            F.sum("_known_flag").over(day_win) > 0,
+                            F.sum(F.col("DepDelay") * F.col("_known_flag")).over(day_win) /
+                            F.sum("_known_flag").over(day_win),
+                        ),
                         F.lit(0.0),
                     ))
         .withColumn("_known_count",
