@@ -672,11 +672,11 @@ def run_feature_engineering(
     logger.info("=== Feature Engineering ===")
     features_df = build_features(spark, flights_df, weather_parquet_path, paths=paths)
 
-    # Materialise once so save_feature_sets doesn't re-execute the full DAG
-    # for each of the 6 feature-set writes.
+    # Cache so save_feature_sets doesn't re-execute the full DAG 6 times.
+    # Do NOT call .count() here — it re-reads bts_cohort_2025.parquet which
+    # OneDrive may rename between the prep write and this read, causing
+    # FILE_NOT_EXIST.  The cache will be materialised on the first write.
     features_df = features_df.cache()
-    cached_count = features_df.count()
-    logger.info("Features cached: %s rows", f"{cached_count:,}")
 
     save_feature_sets(features_df, paths=paths)
     features_df.unpersist()

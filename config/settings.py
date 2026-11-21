@@ -281,7 +281,7 @@ CLUSTER_MASTER_URL: str = _raw_master_url
 # Structured Streaming settings
 # ---------------------------------------------------------------------------
 STREAMING_WATERMARK_MINUTES: int = 15      # late-event tolerance
-STREAMING_TRIGGER_SECONDS:   int = 30      # micro-batch interval
+STREAMING_TRIGGER_SECONDS:   int = 5       # micro-batch interval (5 s for low-latency demo)
 STREAMING_INPUT_DIR:  Path = PROJECT_DIR / "data" / "streaming" / "input"  / "flights"
 STREAMING_OUTPUT_DIR: Path = PROJECT_DIR / "data" / "streaming" / "output" / "scores"
 STREAMING_CHECKPOINT: Path = PROJECT_DIR / "data" / "streaming" / "checkpoints"

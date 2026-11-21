@@ -159,7 +159,8 @@ def _make_weather_reference(spark: SparkSession, weather_parquet: Path) -> DataF
 
 def _make_batch_processor(
     weather_df: DataFrame,
-    hurdle_model: PipelineModel,
+    hurdle_clf: PipelineModel,
+    hurdle_reg: PipelineModel,
     output_dir: Path,
     write_to_kafka: bool,
     spark: SparkSession,
@@ -245,12 +246,32 @@ def _make_batch_processor(
                         F.when(F.col("w_vis") < 4800.0, 1.0).otherwise(0.0))
         )
 
-        # ── 3. Hurdle classifier score ────────────────────────────────────
-        scored = hurdle_model.transform(enriched)
+        # ── 3. Hurdle two-stage score ──────────────────────────────────────
+        # Stage 1: classifier → P(delay > 0)
+        clf_scored = hurdle_clf.transform(enriched)
+        clf_out = clf_scored.withColumn("p_delayed", get_prob1("probability"))
+
+        # Stage 2: regressor → E[delay | delay > 0] on log scale
+        reg_scored = hurdle_reg.transform(enriched)
+        reg_out = reg_scored.withColumn(
+            "cond_delay", F.expm1(F.greatest(F.col("prediction"), F.lit(0.0)))
+        )
+
+        # Join on flight_key to combine both stages
+        combined = clf_out.select("flight_key", "p_delayed").join(
+            reg_out.select("flight_key", "cond_delay"), on="flight_key"
+        )
+
         output = (
-            scored
-            .withColumn("p_delayed", get_prob1("probability"))
+            combined
+            .withColumn("expected_delay",
+                        F.round(F.col("p_delayed") * F.col("cond_delay"), 2))
             .withColumn("scored_at", F.current_timestamp().cast("string"))
+            .join(
+                enriched.select("flight_key", "FlightDate", "Origin", "Dest",
+                                "Reporting_Airline", "scheduled_departure_utc"),
+                on="flight_key",
+            )
             .select(
                 "flight_key",
                 "FlightDate",
@@ -259,6 +280,7 @@ def _make_batch_processor(
                 "Reporting_Airline",
                 "scheduled_departure_utc",
                 "p_delayed",
+                "expected_delay",
                 "scored_at",
             )
         )
@@ -340,7 +362,15 @@ def run_streaming_pipeline(
     weather_df.cache()
 
     logger.info("Loading hurdle classifier from %s…", clf_model_dir)
-    hurdle_model = PipelineModel.load(str(clf_model_dir))
+    hurdle_clf = PipelineModel.load(str(clf_model_dir))
+
+    reg_model_dir = paths["models"] / f"hurdle_{task}_bts_weather_regressor"
+    if not reg_model_dir.exists():
+        reg_model_dir = paths["models"] / f"hurdle_{task}_full_regressor"
+    if not reg_model_dir.exists():
+        raise FileNotFoundError(f"Hurdle regressor not found. Run 'hurdle' step first.")
+    logger.info("Loading hurdle regressor from %s…", reg_model_dir)
+    hurdle_reg = PipelineModel.load(str(reg_model_dir))
 
     write_to_kafka = (source == "kafka")
 
@@ -352,7 +382,7 @@ def run_streaming_pipeline(
         flight_stream = _make_file_flight_source(spark, input_dir)
 
     batch_fn = _make_batch_processor(
-        weather_df, hurdle_model, output_dir, write_to_kafka, spark
+        weather_df, hurdle_clf, hurdle_reg, output_dir, write_to_kafka, spark
     )
 
     query = (
