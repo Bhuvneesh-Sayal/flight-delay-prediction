@@ -21,6 +21,7 @@ Steps (in order)
     ablation      Controlled ablation experiment (18 models, includes baseline)
     hurdle        Two-stage hurdle model
     analysis      Feature importances + residual diagnostic plots
+                  + cross-model summary charts (results/summary_charts/)
     benchmarks    Strong + weak scaling benchmarks (local, simulated cores)
     cluster_bench Inter-node network shuffle benchmarks on the Docker cluster
     produce       Replay historical BTS data into Kafka (simulate live feed)
@@ -182,11 +183,13 @@ def _run(steps: list, kafka: bool, produce_rate: int, produce_limit: int) -> Non
 
     # ── Step 6: Analysis ───────────────────────────────────────────────────
     if "analysis" in steps:
-        _banner("STEP 6 — Feature Importances & Residual Analysis")
+        _banner("STEP 6 — Feature Importances, Residual Analysis & Summary Charts")
         from src.analysis.feature_importance import run_feature_importance_analysis
         from src.analysis.residuals import run_residual_analysis
+        from src.analysis.summary_charts import run_summary_charts
         run_feature_importance_analysis(paths=PATHS)
         run_residual_analysis(spark, paths=PATHS)
+        run_summary_charts(paths=PATHS)
 
     # ── Step 7: Local scaling benchmarks ───────────────────────────────────
     if "benchmarks" in steps:
