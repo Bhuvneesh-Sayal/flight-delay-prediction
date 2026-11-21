@@ -40,9 +40,12 @@ class _NewlineEscapingFormatter(logging.Formatter):
 
 class _SafeStreamHandler(logging.StreamHandler):
     """
-    StreamHandler that silently swallows flush/write errors (e.g. TimeoutError
-    when stdout is backed by a slow network filesystem like OneDrive).
-    The file handler always gets the record regardless.
+    StreamHandler that silently swallows ALL stdout write/flush errors.
+
+    On OneDrive-backed paths stdout occasionally times out. Python's default
+    Handler.handleError() prints a '--- Logging error ---' traceback to
+    stderr even when the exception is caught inside emit(). We override
+    handleError() as well so that secondary traceback never appears.
     """
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -51,7 +54,20 @@ class _SafeStreamHandler(logging.StreamHandler):
             self.stream.write(msg + self.terminator)
             self.stream.flush()
         except Exception:
-            pass  # never let a stdout flush error surface to the user
+            pass  # swallow write/flush errors silently
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        pass  # suppress the '--- Logging error ---' traceback
+
+
+def _suppress_logging_errors() -> None:
+    """
+    Monkey-patch logging.Handler.handleError globally so that no handler
+    anywhere in the process prints '--- Logging error ---' tracebacks.
+    This is needed because Python calls handleError on the *base class*
+    in some internal paths, bypassing our subclass override.
+    """
+    logging.Handler.handleError = lambda self, record: None
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -104,3 +120,7 @@ def get_logger(name: str) -> logging.Logger:
 
     logger._pipeline_configured = True
     return logger
+
+
+# Apply globally at module import time — before any handler is created
+_suppress_logging_errors()

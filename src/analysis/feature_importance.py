@@ -82,6 +82,43 @@ def _reconstruct_feature_names(feature_cols: list) -> list:
     return names
 
 
+def _expand_one_hot_names(pipeline_model: PipelineModel, assembler_inputs: list) -> list:
+    """
+    Map VectorAssembler input columns to one name per vector slot.
+
+    A one-hot column ``{col}_oh`` expands to ``{col}={label}`` per category,
+    using the labels of the StringIndexerModel that produced ``{col}_idx`` and
+    the slot count of the OneHotEncoderModel (categorySize, +1 for
+    handleInvalid='keep', -1 for dropLast). Other columns keep their name.
+    """
+    from pyspark.ml.feature import OneHotEncoderModel, StringIndexerModel
+
+    labels_by_idx_col: dict = {}
+    oh_slots: dict = {}   # "{col}_oh" -> (idx_col, n_slots)
+    for stage in pipeline_model.stages:
+        if isinstance(stage, StringIndexerModel):
+            labels_by_idx_col[stage.getOutputCol()] = list(stage.labels)
+        elif isinstance(stage, OneHotEncoderModel):
+            extra = 1 if stage.getHandleInvalid() == "keep" else 0
+            drop = 1 if stage.getDropLast() else 0
+            for in_col, out_col, size in zip(
+                stage.getInputCols(), stage.getOutputCols(), stage.categorySizes
+            ):
+                oh_slots[out_col] = (in_col, size + extra - drop)
+
+    names: list = []
+    for col in assembler_inputs:
+        if col in oh_slots:
+            idx_col, n_slots = oh_slots[col]
+            base = col[:-3] if col.endswith("_oh") else col
+            labels = labels_by_idx_col.get(idx_col, []) + ["<unseen>"]
+            labels += [f"#{i}" for i in range(len(labels), n_slots)]
+            names += [f"{base}={lab}" for lab in labels[:n_slots]]
+        else:
+            names.append(col[:-4] if col.endswith("_imp") else col)
+    return names
+
+
 def _extract_importances_from_pipeline(
     pipeline_model: PipelineModel,
     feature_cols: list,
@@ -123,8 +160,19 @@ def _extract_importances_from_pipeline(
             "falling back to reconstructed names."
         )
 
-    # Pad / truncate names to match the vector length
+    # Each one-hot input column occupies several vector slots, so expand it
+    # into one name per category; otherwise names shift out of alignment.
     n = len(importances)
+    expanded = _expand_one_hot_names(pipeline_model, list(assembler_inputs))
+    if len(expanded) == n:
+        assembler_inputs = expanded
+    else:
+        logger.warning(
+            "Expanded %d feature names but the vector has %d slots; "
+            "names may be misaligned.", len(expanded), n,
+        )
+
+    # Pad / truncate names to match the vector length
     names = list(assembler_inputs)[:n]
     if len(names) < n:
         names += [f"feature_{i}" for i in range(len(names), n)]

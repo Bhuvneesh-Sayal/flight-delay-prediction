@@ -292,7 +292,7 @@ def standardise_storm_events(
     """
     Parse the NOAA Storm Events detail CSV, assign each event to the nearest
     airport (within STORM_RADIUS_DEG), and persist a compact Parquet with
-    columns: airport, event_date, event_hour_utc, event_type.
+    columns: airport, event_time_utc ("YYYY-MM-DD HH:MM:SS", UTC), event_type.
 
     Returns the output Path, or None if *storm_csv_path* is None / missing.
     """
@@ -310,10 +310,23 @@ def standardise_storm_events(
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.dropna(subset=["BEGIN_LAT", "BEGIN_LON"])
 
-    # Parse event datetime
-    df["event_dt"] = pd.to_datetime(df["BEGIN_DATE_TIME"], errors="coerce")
+    # Parse event datetime. BEGIN_DATE_TIME (e.g. "31-MAR-25 11:04:00") is in
+    # LOCAL STANDARD time; CZ_TIMEZONE gives the fixed offset ("EST-5",
+    # "CST-6", "AKST-9", ...). UTC = local + offset hours.
+    local_dt = pd.to_datetime(
+        df["BEGIN_DATE_TIME"], format="%d-%b-%y %H:%M:%S", errors="coerce"
+    )
+    offset_h = pd.to_numeric(
+        df["CZ_TIMEZONE"].str.extract(r"-(\d{1,2})$", expand=False), errors="coerce"
+    )
+    df["event_dt"] = local_dt + pd.to_timedelta(offset_h, unit="h")
     df = df.dropna(subset=["event_dt"])
-    df = df[df["event_dt"].dt.year == year]
+    # Keep the year plus the last day of the previous year, so flights on
+    # 1 January still see storms from the preceding 24 h.
+    df = df[
+        (df["event_dt"] >= pd.Timestamp(year - 1, 12, 31))
+        & (df["event_dt"] < pd.Timestamp(year + 1, 1, 1))
+    ]
 
     # Match each event to the nearest airport within radius (vectorised)
     import numpy as _np
@@ -338,15 +351,15 @@ def standardise_storm_events(
 
     matched = df.loc[has_match].copy()
     matched["airport"]        = [airport_names[i] for i in match_idx[has_match]]
-    matched["event_date"]     = matched["event_dt"].dt.strftime("%Y-%m-%d")
-    matched["event_hour_utc"] = matched["event_dt"].dt.hour
+    # UTC begin time as a string (avoids PyArrow INT64-nanosecond timestamps)
+    matched["event_time_utc"] = matched["event_dt"].dt.strftime("%Y-%m-%d %H:%M:%S")
     matched["event_type"]     = matched.get("EVENT_TYPE", "Unknown")
 
     if matched.empty:
         logger.warning("No storm events matched our airport cohort.")
         return None
 
-    out_df = matched[["airport", "event_date", "event_hour_utc", "event_type"]].reset_index(drop=True)
+    out_df = matched[["airport", "event_time_utc", "event_type"]].reset_index(drop=True)
     out = paths["processed"] / f"storm_events_{year}.parquet"
     if out.exists():
         if out.is_dir():
