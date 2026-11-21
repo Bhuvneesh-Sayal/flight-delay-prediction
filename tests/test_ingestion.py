@@ -21,6 +21,8 @@ def _mock_response(payload: bytes = b"x" * 2000) -> MagicMock:
     response = MagicMock()
     response.raise_for_status.return_value = None
     response.iter_content.return_value = [payload]
+    # Real dict so get_or_download's Content-Length check sees the true size
+    response.headers = {"Content-Length": str(len(payload))}
     response.__enter__.return_value = response
     response.__exit__.return_value = False
     return response
@@ -40,7 +42,7 @@ def test_get_or_download_cached(ingestion, tmp_path):
 
     with patch.object(requests.Session, "get") as mock_get:
         result = ingestion.get_or_download(
-            "http://example.com/cached.zip", dest, min_bytes=1000
+            "https://example.com/cached.zip", dest, min_bytes=1000
         )
 
     mock_get.assert_not_called()
@@ -57,7 +59,7 @@ def test_get_or_download_downloads(ingestion, tmp_path):
         requests.Session, "get", return_value=_mock_response()
     ) as mock_get:
         result = ingestion.get_or_download(
-            "http://example.com/new.zip", dest, min_bytes=1000
+            "https://example.com/new.zip", dest, min_bytes=1000
         )
 
     mock_get.assert_called_once()
@@ -85,7 +87,7 @@ def test_get_or_download_retries_on_failure(ingestion, tmp_path):
         requests.Session, "get", side_effect=side_effects
     ) as mock_get, patch("time.sleep"):
         ingestion.get_or_download(
-            "http://example.com/retry.zip", dest, min_bytes=1000
+            "https://example.com/retry.zip", dest, min_bytes=1000
         )
 
     assert mock_get.call_count == 3

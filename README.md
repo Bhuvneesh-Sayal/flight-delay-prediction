@@ -137,7 +137,7 @@ Airports: `ATL CLT DEN DFW LAS LAX MCO ORD PHX SEA`
 | Feature | Description |
 |---------|-------------|
 | `origin_congestion_2h` | Rolling 2-hour departure count at origin airport |
-| `prior_leg_delay` | Previous arrival delay for the same aircraft tail number (only legs that departed before the current scheduled departure) |
+| `prior_leg_delay` | Previous arrival delay for the same aircraft tail number (only legs whose estimated arrival is before T-2h) |
 | `weather_crosswind` | Wind component perpendicular to runway heading |
 | `weather_headwind` | Wind component along runway heading |
 | `weather_icing_risk` | 1 if temp ≤ 0°C and dew-point spread ≤ 2°C |
@@ -154,9 +154,9 @@ Airports: `ATL CLT DEN DFW LAS LAX MCO ORD PHX SEA`
 
 - **Validation evaluation**: each row reports `Val_MAE_min`, `Val_RMSE_min`
   and `Val_R2` next to the test metrics
-- **Cross-validation tuning**: `CrossValidator` (`CV_FOLDS` folds, scored on
-  MAE) over `LR_PARAM_GRID`, `RF_PARAM_GRID` and `GBT_PARAM_GRID`; best
-  params and CV MAE are logged
+- **Hyperparameter tuning**: `TrainValidationSplit` (80/20 train-ratio, scored
+  on MAE) over `LR_PARAM_GRID`, `RF_PARAM_GRID` and `GBT_PARAM_GRID`; best
+  params and validation MAE are logged
 - **Model persistence**: best models saved to
   `models/{task}_{condition}_{algorithm}`
 - Pipelines impute only numeric columns that have nulls in the training data

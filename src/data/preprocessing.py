@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql import types as T
 
 from config.settings import (
     BTS_KEEP_COLS,
@@ -29,6 +30,29 @@ from config.settings import (
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Explicit BTS schema  (avoids inferSchema=True full-file scan)
+# ---------------------------------------------------------------------------
+_BTS_SCHEMA = T.StructType([
+    T.StructField("FlightDate",         T.StringType(),  True),
+    T.StructField("Reporting_Airline",  T.StringType(),  True),
+    T.StructField("Tail_Number",        T.StringType(),  True),
+    T.StructField("Origin",             T.StringType(),  True),
+    T.StructField("Dest",               T.StringType(),  True),
+    T.StructField("CRSDepTime",         T.IntegerType(), True),
+    T.StructField("CRSArrTime",         T.IntegerType(), True),
+    T.StructField("DepDelay",           T.DoubleType(),  True),
+    T.StructField("ArrDelay",           T.DoubleType(),  True),
+    T.StructField("Cancelled",          T.DoubleType(),  True),
+    T.StructField("Diverted",           T.DoubleType(),  True),
+    T.StructField("CRSElapsedTime",     T.DoubleType(),  True),
+    T.StructField("CarrierDelay",       T.DoubleType(),  True),
+    T.StructField("WeatherDelay",       T.DoubleType(),  True),
+    T.StructField("NASDelay",           T.DoubleType(),  True),
+    T.StructField("SecurityDelay",      T.DoubleType(),  True),
+    T.StructField("LateAircraftDelay",  T.DoubleType(),  True),
+])
 
 
 # ---------------------------------------------------------------------------
@@ -55,13 +79,26 @@ def clean_flights(
 
     keep_cols = [c if c != "Tail_Number" else tail_col for c in BTS_KEEP_COLS]
 
+    # Use an explicit schema to avoid the inferSchema full-file scan.
+    # If the CSV uses "TailNum" instead of "Tail_Number", swap the field.
+    schema = _BTS_SCHEMA
+    if tail_col != "Tail_Number":
+        schema = T.StructType([
+            T.StructField(tail_col, f.dataType, f.nullable)
+            if f.name == "Tail_Number" else f
+            for f in schema.fields
+        ])
+
+    # Spark applies a CSV schema by column *position*, not by header name, and
+    # the BTS files have ~110 columns.  So read everything as strings (no
+    # inferSchema scan), select the needed columns by header name, then cast.
     raw = (
         spark.read
         .option("header", True)
-        .option("inferSchema", True)
         .csv(bts_csv_files)
         .select(*keep_cols)
     )
+    raw = raw.select(*[F.col(f.name).cast(f.dataType).alias(f.name) for f in schema.fields])
 
     # Normalise tail-number column name
     if tail_col != "Tail_Number":
@@ -278,25 +315,38 @@ def standardise_storm_events(
     df = df.dropna(subset=["event_dt"])
     df = df[df["event_dt"].dt.year == year]
 
-    # Match each event to the nearest airport within radius
-    rows = []
-    for _, row in df.iterrows():
-        lat, lon = row["BEGIN_LAT"], row["BEGIN_LON"]
-        for arpt, (alat, alon) in AIRPORT_COORDS.items():
-            if abs(lat - alat) < STORM_RADIUS_DEG and abs(lon - alon) < STORM_RADIUS_DEG:
-                rows.append({
-                    "airport": arpt,
-                    "event_date": row["event_dt"].strftime("%Y-%m-%d"),
-                    "event_hour_utc": row["event_dt"].hour,
-                    "event_type": row.get("EVENT_TYPE", "Unknown"),
-                })
-                break  # assign to first matching airport only
+    # Match each event to the nearest airport within radius (vectorised)
+    import numpy as _np
 
-    if not rows:
+    airport_names = list(AIRPORT_COORDS.keys())
+    airport_lats  = _np.array([AIRPORT_COORDS[a][0] for a in airport_names])
+    airport_lons  = _np.array([AIRPORT_COORDS[a][1] for a in airport_names])
+
+    ev_lat = df["BEGIN_LAT"].values[:, None]   # (N, 1)
+    ev_lon = df["BEGIN_LON"].values[:, None]
+
+    # Absolute coordinate distance to each airport (N × A)
+    lat_diff = _np.abs(ev_lat - airport_lats[None, :])
+    lon_diff = _np.abs(ev_lon - airport_lons[None, :])
+
+    # Mask to airports within the rectangular radius
+    within = (lat_diff < STORM_RADIUS_DEG) & (lon_diff < STORM_RADIUS_DEG)
+
+    # For each event, pick the first matching airport (by index order)
+    match_idx = _np.argmax(within, axis=1)       # first True column per row
+    has_match = within.any(axis=1)                # rows with at least one True
+
+    matched = df.loc[has_match].copy()
+    matched["airport"]        = [airport_names[i] for i in match_idx[has_match]]
+    matched["event_date"]     = matched["event_dt"].dt.strftime("%Y-%m-%d")
+    matched["event_hour_utc"] = matched["event_dt"].dt.hour
+    matched["event_type"]     = matched.get("EVENT_TYPE", "Unknown")
+
+    if matched.empty:
         logger.warning("No storm events matched our airport cohort.")
         return None
 
-    out_df = pd.DataFrame(rows)
+    out_df = matched[["airport", "event_date", "event_hour_utc", "event_type"]].reset_index(drop=True)
     out = paths["processed"] / f"storm_events_{year}.parquet"
     if out.exists():
         if out.is_dir():

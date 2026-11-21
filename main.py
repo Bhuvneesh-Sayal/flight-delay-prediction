@@ -18,7 +18,7 @@ Steps (in order)
     ingest        Download BTS + NOAA raw data
     prep          Clean flights and standardise weather
     features      Feature engineering (UTC, congestion, weather join, labels)
-    ablation      Controlled ablation experiment (12 models, includes baseline)
+    ablation      Controlled ablation experiment (18 models, includes baseline)
     hurdle        Two-stage hurdle model
     analysis      Feature importances + residual diagnostic plots
     benchmarks    Strong + weak scaling benchmarks (local, simulated cores)
@@ -29,6 +29,7 @@ Steps (in order)
 """
 
 import argparse
+import os
 import sys
 
 from config.settings import CLUSTER_MASTER_URL, PATHS, SPARK_CONFIG
@@ -52,7 +53,13 @@ def _create_spark(with_kafka: bool = False):
     import pyspark
     from pyspark.sql import SparkSession
 
-    builder = SparkSession.builder.appName("FlightDelayPrediction").master("local[*]")
+    builder = SparkSession.builder.appName("FlightDelayPrediction")
+    # Under spark-submit, the JVM is already running and spark-submit sets
+    # PYSPARK_GATEWAY_PORT. Leave the master unset there so --master
+    # (e.g. spark://spark-master:7077) takes effect; a master set in code
+    # would override it. Plain `python main.py` still runs in local mode.
+    if "PYSPARK_GATEWAY_PORT" not in os.environ:
+        builder = builder.master("local[*]")
     for k, v in SPARK_CONFIG.items():
         builder = builder.config(k, v)
 
@@ -140,7 +147,7 @@ def _run(steps: list, kafka: bool, produce_rate: int, produce_limit: int) -> Non
     # Discover cached files when ingest was skipped
     if "prep" in steps and bts_csv_files is None:
         from src.data.ingestion import _discover_cached
-        bts_csv_files, noaa_paths, storm_csv = _discover_cached()
+        bts_csv_files, noaa_paths, storm_csv, _holidays = _discover_cached()
 
     # ── Step 2: Preprocess ─────────────────────────────────────────────────
     if "prep" in steps:

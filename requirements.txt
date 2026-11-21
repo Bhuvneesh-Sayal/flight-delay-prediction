@@ -1,6 +1,6 @@
 # Core Spark stack
 pyspark==4.0.0
-pyarrow>=15.0,<16.0
+pyarrow==15.0.2
 
 # Data / numerics
 pandas>=2.0,<3.0

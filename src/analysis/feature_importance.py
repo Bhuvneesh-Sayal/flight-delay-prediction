@@ -24,6 +24,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 from pyspark.ml import PipelineModel
+from pyspark.ml.feature import VectorAssembler as VectorAssemblerModel
 from pyspark.ml.regression import GBTRegressionModel, RandomForestRegressionModel
 
 from config.settings import (
@@ -88,6 +89,11 @@ def _extract_importances_from_pipeline(
     """
     Pull featureImportances out of the last stage of *pipeline_model* and
     return a tidy DataFrame with columns [feature, importance].
+
+    Feature names are recovered from the VectorAssembler's ``inputCols``
+    metadata, which is authoritative — it lists exactly the columns that
+    were assembled into the feature vector, in the same order as the
+    importance indices.
     """
     last_stage = pipeline_model.stages[-1]
 
@@ -99,12 +105,23 @@ def _extract_importances_from_pipeline(
 
     importances = last_stage.featureImportances.toArray()
 
-    # Assembler input list is stored in the VectorAssembler metadata
-    assembler = pipeline_model.stages[-2]           # always the stage before estimator
-    try:
-        assembler_inputs = assembler.getInputCols()
-    except Exception:
+    # Find the VectorAssembler in the pipeline (search backwards — it's
+    # usually the second-to-last stage, but may shift if stages change).
+    assembler_inputs = None
+    for stage in reversed(pipeline_model.stages):
+        if isinstance(stage, VectorAssemblerModel) or hasattr(stage, "getInputCols"):
+            try:
+                assembler_inputs = stage.getInputCols()
+                break
+            except Exception:
+                continue
+
+    if assembler_inputs is None:
         assembler_inputs = _reconstruct_feature_names(feature_cols)
+        logger.warning(
+            "Could not extract inputCols from VectorAssembler; "
+            "falling back to reconstructed names."
+        )
 
     # Pad / truncate names to match the vector length
     n = len(importances)

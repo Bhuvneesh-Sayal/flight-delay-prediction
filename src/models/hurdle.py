@@ -70,6 +70,11 @@ def _run_single_task(
     """Train and evaluate the two-stage hurdle model for one task."""
     logger.info("Training hurdle model: %s (%s)…", task.upper(), condition)
 
+    # Local evaluators — avoid mutating shared module-level state
+    eval_mae  = RegressionEvaluator(metricName="mae")
+    eval_rmse = RegressionEvaluator(metricName="rmse")
+    eval_r2   = RegressionEvaluator(metricName="r2")
+
     ds = spark.read.parquet(str(paths["features"] / f"{task}_{condition}"))
     ds = ds.withColumn(
         _CLS_LABEL,

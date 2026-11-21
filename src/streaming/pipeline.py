@@ -232,9 +232,9 @@ def _make_batch_processor(
                             F.lit(0.0),
                         ))
             .withColumn("weather_crosswind",
-                        F.abs(F.col("w_wspeed") * F.sin(wind_diff)))
+                        F.coalesce(F.abs(F.col("w_wspeed") * F.sin(wind_diff)), F.lit(0.0)))
             .withColumn("weather_headwind",
-                        F.col("w_wspeed") * F.cos(wind_diff))
+                        F.coalesce(F.col("w_wspeed") * F.cos(wind_diff), F.lit(0.0)))
             .withColumn("weather_icing_risk",
                         F.when(
                             (F.col("w_temp") <= 0.0) &

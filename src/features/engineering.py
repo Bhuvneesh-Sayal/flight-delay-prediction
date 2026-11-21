@@ -32,7 +32,6 @@ from pyspark.sql.window import Window
 
 from config.settings import (
     AIRPORT_RUNWAYS,
-    AIRPORT_STATIONS,
     BTS_FEATURE_COLS,
     FULL_FEATURE_COLS,
     MIN_WEATHER_COVERAGE,
@@ -151,7 +150,6 @@ def _join_weather(spark: SparkSession, flights, weather_parquet_path: Path) -> o
     """
     Left-join each flight with the most recent weather observation in the
     window [T-8h, T-2h], where T is the scheduled UTC departure.
-    Both batch (here) and streaming use the same 8-hour lookback window.
     """
     weather_spark = (
         spark.read.parquet(str(weather_parquet_path))
@@ -176,7 +174,7 @@ def _join_weather(spark: SparkSession, flights, weather_parquet_path: Path) -> o
     join_cond = (
         (F.col("Origin") == F.col("w_airport")) &
         (F.col("w_time_utc") <= F.col("t_minus_2_utc")) &
-        (F.col("w_time_utc") >= F.expr("t_minus_2_utc - INTERVAL 8 HOURS"))
+        (F.col("w_time_utc") >= F.expr("t_minus_2_utc - INTERVAL 6 HOURS"))
     )
 
     matched = flights.join(w_clean, join_cond, "left")
@@ -315,9 +313,15 @@ def _add_delay_cause_aggregates(flights) -> object:
         .withColumn("airport_total_delayed_today",
                     F.coalesce(F.sum("_del15_flag").over(day_win), F.lit(0)).cast("double"))
         .withColumn("airport_avg_delay_today",
+                    # F.when guard instead of F.nullif: nullif over a window
+                    # fails to resolve on Spark 3.5, and a bare division by
+                    # zero raises under Spark 4's default ANSI mode.
                     F.coalesce(
-                        F.sum(F.col("DepDelay") * F.col("_known_flag")).over(day_win) /
-                        F.nullif(F.sum("_known_flag").over(day_win), F.lit(0)),
+                        F.when(
+                            F.sum("_known_flag").over(day_win) > 0,
+                            F.sum(F.col("DepDelay") * F.col("_known_flag")).over(day_win) /
+                            F.sum("_known_flag").over(day_win),
+                        ),
                         F.lit(0.0),
                     ))
         .withColumn("_known_count",
@@ -580,5 +584,13 @@ def run_feature_engineering(
     """
     logger.info("=== Feature Engineering ===")
     features_df = build_features(spark, flights_df, weather_parquet_path, paths=paths)
+
+    # Materialise once so save_feature_sets doesn't re-execute the full DAG
+    # for each of the 6 feature-set writes.
+    features_df = features_df.cache()
+    cached_count = features_df.count()
+    logger.info("Features cached: %s rows", f"{cached_count:,}")
+
     save_feature_sets(features_df, paths=paths)
+    features_df.unpersist()
     return features_df
