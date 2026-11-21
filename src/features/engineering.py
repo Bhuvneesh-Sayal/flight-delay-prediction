@@ -116,25 +116,39 @@ def _add_operational_features(spark: SparkSession, flights) -> object:
         flights = (
             flights
             .withColumn("prev_arr_delay",      F.lag("ArrDelay",              1).over(tail_win))
+            .withColumn("prev_dep_delay",      F.lag("DepDelay",              1).over(tail_win))
             .withColumn("prev_dep_utc",        F.lag("scheduled_departure_utc", 1).over(tail_win))
             .withColumn("prev_elapsed_min",    F.lag("CRSElapsedTime",          1).over(tail_win))
-            # Estimated scheduled arrival of the previous leg
-            .withColumn(
-                "prev_sched_arr_utc",
-                F.expr("prev_dep_utc + make_interval(0, 0, 0, 0, 0, cast(prev_elapsed_min as int), 0)"),
-            )
+            # When the previous leg ACTUALLY left and landed (epoch seconds):
+            #   actual departure = scheduled departure + DepDelay
+            #   actual arrival   = scheduled departure + CRSElapsedTime + ArrDelay
+            .withColumn("_prev_dep_sec", F.col("prev_dep_utc").cast("long"))
+            .withColumn("_prev_actual_dep_sec",
+                        F.col("_prev_dep_sec") + F.col("prev_dep_delay") * 60.0)
+            .withColumn("_prev_actual_arr_sec",
+                        F.col("_prev_dep_sec")
+                        + (F.col("prev_elapsed_min") + F.col("prev_arr_delay")) * 60.0)
+            .withColumn("_t2_sec", F.col("t_minus_2_utc").cast("long"))
             .withColumn(
                 "prior_leg_delay",
+                # Must be a strictly earlier flight of the same aircraft
                 F.when(
-                    # Previous leg's scheduled arrival must be known by T-2h
-                    F.col("prev_sched_arr_utc").isNotNull() &
-                    (F.col("prev_sched_arr_utc") <= F.col("t_minus_2_utc")) &
-                    # Must be a strictly earlier flight (not the same flight)
-                    (F.col("prev_dep_utc") < F.col("scheduled_departure_utc")),
-                    F.coalesce(F.col("prev_arr_delay"), F.lit(0.0)),
-                ).otherwise(0.0),
+                    F.col("_prev_dep_sec").isNull() |
+                    (F.col("prev_dep_utc") >= F.col("scheduled_departure_utc")),
+                    F.lit(0.0),
+                )
+                # Landed by T-2h: its arrival delay is known
+                .when(F.col("_prev_actual_arr_sec") <= F.col("_t2_sec"),
+                      F.coalesce(F.col("prev_arr_delay"), F.lit(0.0)))
+                # Departed but not yet landed by T-2h: its departure delay is
+                # the best estimate known at prediction time
+                .when(F.col("_prev_actual_dep_sec") <= F.col("_t2_sec"),
+                      F.coalesce(F.col("prev_dep_delay"), F.lit(0.0)))
+                # Not yet departed by T-2h: nothing known
+                .otherwise(0.0),
             )
-            .drop("prev_sched_arr_utc", "prev_elapsed_min")
+            .drop("prev_elapsed_min", "prev_dep_delay", "_prev_dep_sec",
+                  "_prev_actual_dep_sec", "_prev_actual_arr_sec", "_t2_sec")
         )
     else:
         flights = flights.withColumn("prior_leg_delay", F.lit(0.0))
@@ -332,7 +346,8 @@ def _add_contextual_features(spark: SparkSession, flights, paths: dict = PATHS) 
     """
     Add storm-event counts (6h / 24h windows) and holiday flags.
 
-    Storm events: joined from the preprocessed storm_events Parquet.
+    Storm events: counts of storms near the origin that began in the 6 h /
+    24 h before the prediction time (T-2h), from the storm_events Parquet.
     Holidays: loaded from the holidays JSON and broadcast-joined.
     Both gracefully fall back to zeros if the data files are missing.
     """
@@ -340,37 +355,56 @@ def _add_contextual_features(spark: SparkSession, flights, paths: dict = PATHS) 
     storm_path = paths["processed"] / f"storm_events_{YEAR}.parquet"
     if storm_path.exists():
         logger.info("Joining storm event counts")
-        storms = spark.read.parquet(str(storm_path))
-
-        # Build a per-airport, per-date count
-        storm_daily = (
-            storms
-            .withColumn("event_date", F.to_date("event_date"))
-            .groupBy("airport", "event_date")
-            .agg(
-                F.count("*").alias("_storm_count_24h"),
-                F.sum(
-                    F.when(F.col("event_hour_utc") >= 6, 1).otherwise(0)
-                ).alias("_storm_count_6h"),  # daytime events (06-23 UTC)
+        storms = (
+            spark.read.parquet(str(storm_path))
+            .select(
+                F.col("airport").alias("_s_airport"),
+                F.to_timestamp("event_time_utc", "yyyy-MM-dd HH:mm:ss").alias("_s_time"),
             )
         )
 
-        flights = flights.withColumn("_fdate", F.to_date("FlightDate"))
-        flights = flights.join(
-            storm_daily,
-            on=(
-                (F.col("Origin") == F.col("airport")) &
-                (F.col("_fdate") == F.col("event_date"))
-            ),
-            how="left",
+        # Count storms that BEGAN within the windows before the prediction
+        # time t_minus_2_utc (T-2h):  6h = [T-8h, T-2h],  24h = [T-26h, T-2h].
+        # A storm can only affect flights whose T-2h falls on its UTC date or
+        # the next one, so each storm is copied to those two date buckets and
+        # the range join only compares flights and storms within a bucket.
+        storms_bucketed = storms.withColumn(
+            "_s_bucket",
+            F.explode(F.array(F.to_date("_s_time"), F.date_add(F.to_date("_s_time"), 1))),
         )
+        storm_counts = (
+            flights.select(
+                "flight_key", "Origin", "t_minus_2_utc",
+                F.to_date("t_minus_2_utc").alias("_f_bucket"),
+            )
+            .join(
+                storms_bucketed,
+                on=(
+                    (F.col("Origin") == F.col("_s_airport")) &
+                    (F.col("_f_bucket") == F.col("_s_bucket")) &
+                    (F.col("_s_time") <= F.col("t_minus_2_utc")) &
+                    (F.col("_s_time") >= F.expr("t_minus_2_utc - INTERVAL 24 HOURS"))
+                ),
+                how="inner",
+            )
+            .groupBy("flight_key")
+            .agg(
+                F.count("*").alias("_storm_count_24h"),
+                F.sum(
+                    F.when(F.col("_s_time") >= F.expr("t_minus_2_utc - INTERVAL 6 HOURS"), 1)
+                    .otherwise(0)
+                ).alias("_storm_count_6h"),
+            )
+        )
+
         flights = (
             flights
+            .join(storm_counts, on="flight_key", how="left")
             .withColumn("storm_events_24h",
                         F.coalesce(F.col("_storm_count_24h"), F.lit(0)).cast("double"))
             .withColumn("storm_events_6h",
                         F.coalesce(F.col("_storm_count_6h"), F.lit(0)).cast("double"))
-            .drop("_fdate", "airport", "event_date", "_storm_count_24h", "_storm_count_6h")
+            .drop("_storm_count_24h", "_storm_count_6h")
         )
         logger.info("Storm event features added")
     else:
