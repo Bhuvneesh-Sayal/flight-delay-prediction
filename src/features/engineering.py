@@ -100,7 +100,18 @@ def _add_operational_features(spark: SparkSession, flights) -> object:
             F.to_utc_timestamp("sched_dep_local", F.col("origin_tz")),
         )
         .withColumn("t_minus_2_utc", F.expr("scheduled_departure_utc - INTERVAL 2 HOURS"))
-        .withColumn("flight_key", F.monotonically_increasing_id())
+        # Deterministic key: a hash of fields that identify a flight (unique
+        # across the 2025 cohort). monotonically_increasing_id() is NOT
+        # stable — Spark may assign different ids each time the plan is
+        # recomputed, which mismatches the self-joins on flight_key below.
+        .withColumn(
+            "flight_key",
+            F.xxhash64(
+                F.col("FlightDate").cast("string"), "Reporting_Airline",
+                F.coalesce(F.col("Tail_Number"), F.lit("")), "Origin", "Dest",
+                F.col("CRSDepTime").cast("string"),
+            ),
+        )
     )
 
     # -- Feature 1: rolling 2-hour departure congestion --
