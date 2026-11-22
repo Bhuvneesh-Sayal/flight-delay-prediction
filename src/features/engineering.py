@@ -115,15 +115,33 @@ def _add_operational_features(spark: SparkSession, flights) -> object:
     )
 
     # -- Feature 1: rolling 2-hour departure congestion --
-    time_sec = F.col("scheduled_departure_utc").cast("long")
-    cong_win = Window.partitionBy("Origin").orderBy(time_sec).rangeBetween(-7200, 0)
-    flights = flights.withColumn(
-        "origin_congestion_2h", F.count("flight_key").over(cong_win) - 1
+    # Other flights scheduled from the same origin in [T-2h, T].
+    # A window partitioned by Origin alone gives only 10 partitions (10 tasks,
+    # skewed towards the busiest hubs). Partition by (Origin, UTC day) instead
+    # — 3,650 partitions — and copy flights in the last 2 h of a day into the
+    # next day's partition so windows that cross midnight still see them;
+    # copies are counted but never kept as output rows.
+    sched_sec = F.col("scheduled_departure_utc").cast("long")
+    base = flights.select("flight_key", "Origin", sched_sec.alias("_t"),
+                          F.to_date("scheduled_departure_utc").alias("_day"))
+    spill = (base
+             .filter(F.col("_t") >= F.unix_timestamp(F.date_add("_day", 1).cast("timestamp")) - 7200)
+             .withColumn("_day", F.date_add("_day", 1))
+             .withColumn("_copy", F.lit(1)))
+    cong_win = Window.partitionBy("Origin", "_day").orderBy("_t").rangeBetween(-7200, 0)
+    congestion = (
+        base.withColumn("_copy", F.lit(0)).unionByName(spill)
+        .withColumn("origin_congestion_2h", F.count(F.lit(1)).over(cong_win) - 1)
+        .filter(F.col("_copy") == 0)
+        .select("flight_key", "origin_congestion_2h")
     )
+    flights = flights.join(congestion, on="flight_key", how="left")
 
     # -- Feature 2: prior-leg aircraft rotation delay --
     if "Tail_Number" in flights.columns:
-        tail_win = Window.partitionBy("Tail_Number").orderBy("scheduled_departure_utc")
+        # flight_key breaks ties between flights of one aircraft scheduled at the
+        # same minute, so the previous leg is the same on every run.
+        tail_win = Window.partitionBy("Tail_Number").orderBy("scheduled_departure_utc", "flight_key")
         flights = (
             flights
             .withColumn("prev_arr_delay",      F.lag("ArrDelay",              1).over(tail_win))

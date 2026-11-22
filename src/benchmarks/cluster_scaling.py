@@ -130,7 +130,7 @@ def _bench_join(spark: SparkSession, parquet_path: str, rows: int) -> float:
 
 
 def _weather_asof_join(spark: SparkSession, parquet_path: str, rows: int,
-                       weather_path: str, broadcast: bool) -> float:
+                       weather_path: str, broadcast: bool, bucketed: bool = True) -> float:
     """
     The pipeline's as-of weather join (flight x readings at the origin in
     [T-8h, T-2h], keep the latest) with an explicit join strategy:
@@ -138,8 +138,14 @@ def _weather_asof_join(spark: SparkSession, parquet_path: str, rows: int,
     broadcast=True  — weather table (130 K rows) broadcast to every executor;
                       no shuffle of the flight table.
     broadcast=False — broadcasting disabled (static and AQE thresholds = -1),
-                      so Spark shuffles both sides on the equi-key (airport)
-                      and sort-merge joins them; only 10 airport keys exist.
+                      so Spark shuffles both sides on the equi-key and
+                      sort-merge joins them.
+    bucketed=False  — equi-key is the airport only (10 keys): every flight is
+                      paired with all readings of its airport before the time
+                      filter (the pipeline's original form).
+    bucketed=True   — equi-key is (airport, UTC date of T-2h); each reading is
+                      copied to the date buckets it can serve (the pipeline's
+                      optimized form, see engineering._join_weather).
     """
     keys = ["spark.sql.autoBroadcastJoinThreshold", "spark.sql.adaptive.autoBroadcastJoinThreshold"]
     old = {k: spark.conf.get(k, None) for k in keys}
@@ -158,10 +164,15 @@ def _weather_asof_join(spark: SparkSession, parquet_path: str, rows: int,
                     F.to_timestamp("weather_time_str", "yyyy-MM-dd HH:mm:ss").alias("w_time"),
                     F.col("temperature").alias("w_temp"))
         )
-        right = F.broadcast(weather) if broadcast else weather
         cond = ((F.col("Origin") == F.col("w_airport")) &
                 (F.col("w_time") <= F.col("t2")) &
                 (F.col("w_time") >= F.expr("t2 - INTERVAL 6 HOURS")))
+        if bucketed:
+            weather = weather.withColumn("w_bucket", F.explode(F.array_distinct(F.array(
+                F.to_date("w_time"), F.to_date(F.expr("w_time + INTERVAL 6 HOURS"))))))
+            flights = flights.withColumn("f_bucket", F.to_date("t2"))
+            cond = cond & (F.col("f_bucket") == F.col("w_bucket"))
+        right = F.broadcast(weather) if broadcast else weather
         win = Window.partitionBy("flight_key").orderBy(F.col("w_time").desc_nulls_last())
         query = (
             flights.join(right, cond, "left")
@@ -261,14 +272,19 @@ def run_cluster_benchmarks(
         "GlobalSort": _bench_sort,
         "HashJoin":   _bench_join,
         # Join-strategy comparison on the real as-of weather join
-        "WeatherJoin_broadcast": lambda s, p, r: _weather_asof_join(s, p, r, weather_path, True),
-        "WeatherJoin_shuffle":   lambda s, p, r: _weather_asof_join(s, p, r, weather_path, False),
+        "WeatherJoin_bucketed_broadcast": lambda s, p, r: _weather_asof_join(s, p, r, weather_path, True, True),
+        "WeatherJoin_bucketed_shuffle":   lambda s, p, r: _weather_asof_join(s, p, r, weather_path, False, True),
+        "WeatherJoin_airportkey_broadcast": lambda s, p, r: _weather_asof_join(s, p, r, weather_path, True, False),
+        "WeatherJoin_airportkey_shuffle":   lambda s, p, r: _weather_asof_join(s, p, r, weather_path, False, False),
     }
+    # The airport-key-only joins are quadratic per airport; run them at the
+    # smallest size only so the benchmark stays short.
+    sizes_for = {w: (row_sizes[:1] if "airportkey" in w else row_sizes) for w in workloads}
 
     results: list = []
 
     for wl_name, wl_fn in workloads.items():
-        for rows in row_sizes:
+        for rows in sizes_for[wl_name]:
             logger.info("Running %s | rows=%d…", wl_name, rows)
             try:
                 elapsed = wl_fn(spark, parquet_path, rows)
