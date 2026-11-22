@@ -197,8 +197,8 @@ services:
     hostname: kafka
     container_name: kafka
     ports:
-      - "127.0.0.1:9092:9092"    # internal Docker network (containers use this)
-      - "127.0.0.1:9094:9094"    # host access — Spark/producer on your Mac use this
+      - "127.0.0.1:9092:9092"    # PLAINTEXT — host access (also advertised to Spark)
+      - "127.0.0.1:9094:9094"    # PLAINTEXT_HOST — legacy external port
     environment:
       # KRaft: broker acts as both broker and controller (single node)
       KAFKA_NODE_ID: "1"

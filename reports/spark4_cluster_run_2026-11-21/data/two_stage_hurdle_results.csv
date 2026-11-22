@@ -1,0 +1,5 @@
+Task,Condition,Stage1_ROC_AUC,TwoStage_MAE_min,TwoStage_RMSE_min,TwoStage_R2
+departure,bts_weather,0.6628,23.6,56.2,0.0137
+departure,full,0.6612,23.51,56.25,0.0117
+arrival,bts_weather,0.6092,29.79,58.6,0.0167
+arrival,full,0.6046,29.76,58.63,0.0155

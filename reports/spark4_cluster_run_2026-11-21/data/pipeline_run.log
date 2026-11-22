@@ -1,0 +1,437 @@
+==================================================
+ Flight Delay Prediction — Cluster Job Submission
+==================================================
+ Master   : spark://spark-master:7077
+ Driver   : 2g RAM
+ Executor : 1g RAM × 2 cores each
+ Args     : --steps ingest prep features ablation hurdle analysis
+==================================================
+
+ Container spark-master Recreate 
+ Container spark-master Recreated 
+ Container spark-worker-2 Recreate 
+ Container spark-worker-1 Recreate 
+ Container spark-worker-3 Recreate 
+ Container spark-worker-3 Recreated 
+ Container spark-worker-2 Recreated 
+ Container spark-worker-1 Recreated 
+ Container spark-master Starting 
+ Container spark-master Started 
+ Container spark-master Waiting 
+ Container spark-master Waiting 
+ Container spark-master Waiting 
+ Container spark-master Healthy 
+ Container spark-worker-2 Starting 
+ Container spark-master Healthy 
+ Container spark-worker-1 Starting 
+ Container spark-master Healthy 
+ Container spark-worker-3 Starting 
+ Container spark-worker-2 Started 
+ Container spark-worker-1 Started 
+ Container spark-worker-3 Started 
+ Container spark-master Waiting 
+ Container spark-master Healthy 
+ Container spark_docker-driver-run-dd8b0c4f9aa1 Creating 
+ Container spark_docker-driver-run-dd8b0c4f9aa1 Created 
+WARNING: Using incubator modules: jdk.incubator.vector
+Using Spark's default log4j profile: org/apache/spark/log4j2-defaults.properties
+26/11/21 10:59:13 INFO SparkContext: Running Spark version 4.0.0
+26/11/21 10:59:13 INFO SparkContext: OS info Linux, 7.0.12-linuxkit, aarch64
+26/11/21 10:59:13 INFO SparkContext: Java version 17.0.21.0.2
+26/11/21 10:59:13 WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+26/11/21 10:59:13 INFO ResourceUtils: ==============================================================
+26/11/21 10:59:13 INFO ResourceUtils: No custom resources configured for spark.driver.
+26/11/21 10:59:13 INFO ResourceUtils: ==============================================================
+26/11/21 10:59:13 INFO SparkContext: Submitted application: FlightDelayPrediction
+26/11/21 10:59:13 INFO ResourceProfile: Default ResourceProfile created, executor resources: Map(cores -> name: cores, amount: 2, script: , vendor: , memory -> name: memory, amount: 1024, script: , vendor: , offHeap -> name: offHeap, amount: 0, script: , vendor: ), task resources: Map(cpus -> name: cpus, amount: 1.0)
+26/11/21 10:59:13 INFO ResourceProfile: Limiting resource is cpus at 2 tasks per executor
+26/11/21 10:59:13 INFO ResourceProfileManager: Added ResourceProfile id: 0
+26/11/21 10:59:13 INFO SecurityManager: Changing view acls to: root
+26/11/21 10:59:13 INFO SecurityManager: Changing modify acls to: root
+26/11/21 10:59:13 INFO SecurityManager: Changing view acls groups to: root
+26/11/21 10:59:13 INFO SecurityManager: Changing modify acls groups to: root
+26/11/21 10:59:13 INFO SecurityManager: SecurityManager: authentication disabled; ui acls disabled; users with view permissions: root groups with view permissions: EMPTY; users with modify permissions: root; groups with modify permissions: EMPTY; RPC SSL disabled
+26/11/21 10:59:13 INFO Utils: Successfully started service 'sparkDriver' on port 40079.
+26/11/21 10:59:13 INFO SparkEnv: Registering MapOutputTracker
+26/11/21 10:59:13 INFO SparkEnv: Registering BlockManagerMaster
+26/11/21 10:59:13 INFO BlockManagerMasterEndpoint: Using org.apache.spark.storage.DefaultTopologyMapper for getting topology information
+26/11/21 10:59:13 INFO BlockManagerMasterEndpoint: BlockManagerMasterEndpoint up
+26/11/21 10:59:13 INFO SparkEnv: Registering BlockManagerMasterHeartbeat
+26/11/21 10:59:13 INFO DiskBlockManager: Created local directory at /tmp/blockmgr-5ebe01ae-f90c-4df4-94e3-0f4d3be527bc
+26/11/21 10:59:13 INFO SparkEnv: Registering OutputCommitCoordinator
+26/11/21 10:59:13 INFO JettyUtils: Start Jetty 0.0.0.0:4040 for SparkUI
+26/11/21 10:59:13 INFO Utils: Successfully started service 'SparkUI' on port 4040.
+26/11/21 10:59:13 INFO SecurityManager: Changing view acls to: root
+26/11/21 10:59:13 INFO SecurityManager: Changing modify acls to: root
+26/11/21 10:59:13 INFO SecurityManager: Changing view acls groups to: root
+26/11/21 10:59:13 INFO SecurityManager: Changing modify acls groups to: root
+26/11/21 10:59:13 INFO SecurityManager: SecurityManager: authentication disabled; ui acls disabled; users with view permissions: root groups with view permissions: EMPTY; users with modify permissions: root; groups with modify permissions: EMPTY; RPC SSL disabled
+26/11/21 10:59:13 INFO StandaloneAppClient$ClientEndpoint: Connecting to master spark://spark-master:7077...
+26/11/21 10:59:13 INFO TransportClientFactory: Successfully created connection to spark-master/172.19.0.2:7077 after 12 ms (0 ms spent in bootstraps)
+26/11/21 10:59:13 INFO StandaloneSchedulerBackend: Connected to Spark cluster with app ID app-20261121105913-0000
+26/11/21 10:59:13 INFO Utils: Successfully started service 'org.apache.spark.network.netty.NettyBlockTransferService' on port 38733.
+26/11/21 10:59:13 INFO NettyBlockTransferService: Server created on spark-driver 0.0.0.0:38733
+26/11/21 10:59:13 INFO BlockManager: Using org.apache.spark.storage.RandomBlockReplicationPolicy for block replication policy
+26/11/21 10:59:13 INFO BlockManagerMaster: Registering BlockManager BlockManagerId(driver, spark-driver, 38733, None)
+26/11/21 10:59:13 INFO BlockManagerMasterEndpoint: Registering block manager spark-driver:38733 with 1048.8 MiB RAM, BlockManagerId(driver, spark-driver, 38733, None)
+26/11/21 10:59:13 INFO BlockManagerMaster: Registered BlockManager BlockManagerId(driver, spark-driver, 38733, None)
+26/11/21 10:59:13 INFO BlockManager: Initialized BlockManager: BlockManagerId(driver, spark-driver, 38733, None)
+26/11/21 10:59:13 INFO StandaloneAppClient$ClientEndpoint: Executor added: app-20261121105913-0000/0 on worker-20261121105911-172.19.0.5-34775 (172.19.0.5:34775) with 2 core(s)
+26/11/21 10:59:13 INFO StandaloneSchedulerBackend: Granted executor ID app-20261121105913-0000/0 on hostPort 172.19.0.5:34775 with 2 core(s), 1024.0 MiB RAM
+26/11/21 10:59:13 INFO StandaloneAppClient$ClientEndpoint: Executor added: app-20261121105913-0000/1 on worker-20261121105911-172.19.0.4-42209 (172.19.0.4:42209) with 2 core(s)
+26/11/21 10:59:13 INFO StandaloneSchedulerBackend: Granted executor ID app-20261121105913-0000/1 on hostPort 172.19.0.4:42209 with 2 core(s), 1024.0 MiB RAM
+26/11/21 10:59:13 INFO StandaloneAppClient$ClientEndpoint: Executor added: app-20261121105913-0000/2 on worker-20261121105911-172.19.0.3-44307 (172.19.0.3:44307) with 2 core(s)
+26/11/21 10:59:13 INFO StandaloneSchedulerBackend: Granted executor ID app-20261121105913-0000/2 on hostPort 172.19.0.3:44307 with 2 core(s), 1024.0 MiB RAM
+26/11/21 10:59:14 INFO StandaloneAppClient$ClientEndpoint: Executor updated: app-20261121105913-0000/2 is now RUNNING
+26/11/21 10:59:14 INFO StandaloneAppClient$ClientEndpoint: Executor updated: app-20261121105913-0000/0 is now RUNNING
+26/11/21 10:59:14 INFO StandaloneAppClient$ClientEndpoint: Executor updated: app-20261121105913-0000/1 is now RUNNING
+26/11/21 10:59:14 INFO StandaloneSchedulerBackend: SchedulerBackend is ready for scheduling beginning after reached minRegisteredResourcesRatio: 0.0
+26/11/21 10:59:16 INFO StandaloneSchedulerBackend$StandaloneDriverEndpoint: Registered executor NettyRpcEndpointRef(spark-client://Executor) (172.19.0.5:45698) with ID 0, ResourceProfileId 0
+26/11/21 10:59:16 INFO StandaloneSchedulerBackend$StandaloneDriverEndpoint: Registered executor NettyRpcEndpointRef(spark-client://Executor) (172.19.0.3:53392) with ID 2, ResourceProfileId 0
+26/11/21 10:59:16 INFO StandaloneSchedulerBackend$StandaloneDriverEndpoint: Registered executor NettyRpcEndpointRef(spark-client://Executor) (172.19.0.4:50556) with ID 1, ResourceProfileId 0
+26/11/21 10:59:16 INFO BlockManagerMasterEndpoint: Registering block manager 172.19.0.3:35311 with 434.4 MiB RAM, BlockManagerId(2, 172.19.0.3, 35311, None)
+26/11/21 10:59:16 INFO BlockManagerMasterEndpoint: Registering block manager 172.19.0.4:33921 with 434.4 MiB RAM, BlockManagerId(1, 172.19.0.4, 33921, None)
+26/11/21 10:59:16 INFO BlockManagerMasterEndpoint: Registering block manager 172.19.0.5:40313 with 434.4 MiB RAM, BlockManagerId(0, 172.19.0.5, 40313, None)
+2026-11-21 10:59:17 [INFO] main — Spark 4.0.0 | PySpark 4.0.0
+2026-11-21 10:59:17 [INFO] main — ============================================================
+2026-11-21 10:59:17 [INFO] main — STEP 1 — Data Ingestion
+2026-11-21 10:59:17 [INFO] main — ============================================================
+2026-11-21 10:59:17 [INFO] src.data.ingestion — === BTS Ingestion ===
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_01.zip (27,108,664 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-01
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_02.zip (25,302,583 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-02
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_03.zip (30,544,825 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-03
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_04.zip (29,369,186 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-04
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_05.zip (30,830,593 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-05
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_06.zip (31,131,411 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-06
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_07.zip (32,208,704 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-07
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_08.zip (30,864,245 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-08
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_09.zip (28,151,630 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-09
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_10.zip (30,723,803 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-10
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_11.zip (28,847,755 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-11
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: bts_2025_12.zip (30,337,431 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated BTS 2025-12
+2026-11-21 10:59:17 [INFO] src.data.ingestion — === NOAA Ingestion ===
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00013874_2025.psv (12,122,155 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for ATL
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00013881_2025.psv (11,975,078 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for CLT
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00003017_2025.psv (12,069,776 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for DEN
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00003927_2025.psv (11,394,794 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for DFW
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00023169_2025.psv (10,247,741 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for LAS
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00023174_2025.psv (12,180,120 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for LAX
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00012815_2025.psv (11,669,791 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for MCO
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00094846_2025.psv (12,264,211 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for ORD
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00023183_2025.psv (10,334,077 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for PHX
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: GHCNh_USW00024233_2025.psv (12,241,855 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Validated NOAA station for SEA
+2026-11-21 10:59:17 [INFO] src.data.ingestion — === NOAA Storm Events Ingestion ===
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: storm_events_2025.csv (71,101,206 bytes)
+2026-11-21 10:59:17 [INFO] src.data.ingestion — === US Holidays Ingestion ===
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Cache hit: us_holidays_2025.json
+2026-11-21 10:59:17 [INFO] src.data.ingestion — Download manifest saved → /app/logs/download_manifest.json
+2026-11-21 10:59:17 [INFO] main — ============================================================
+2026-11-21 10:59:17 [INFO] main — STEP 2 — Preprocessing
+2026-11-21 10:59:17 [INFO] main — ============================================================
+2026-11-21 10:59:17 [INFO] src.data.preprocessing — === Flight Cleaning ===
+2026-11-21 10:59:39 [INFO] src.data.preprocessing — Cleaned cohort: 465,685 rows → /app/data/processed/bts_cohort_2025.parquet
+2026-11-21 10:59:39 [INFO] src.data.preprocessing — Quality check | total rows: 465,685
+2026-11-21 10:59:40 [INFO] src.data.preprocessing — Quality check | null rate DepDelay: 0.0000% (0 of 465,685)
+2026-11-21 10:59:40 [INFO] src.data.preprocessing — Quality check | null rate ArrDelay: 0.0000% (0 of 465,685)
+2026-11-21 10:59:40 [INFO] src.data.preprocessing — Quality check | null rate CRSElapsedTime: 0.0000% (0 of 465,685)
+2026-11-21 10:59:40 [INFO] src.data.preprocessing — Quality check | null rate Tail_Number: 0.0000% (0 of 465,685)
+2026-11-21 10:59:42 [INFO] src.data.preprocessing — Quality check | DepDelay distribution: mean=14.74 stddev=56.86 min=-35.00 max=2315.00 p50=-1.00 p95=88.00
+2026-11-21 10:59:42 [INFO] src.data.preprocessing — Quality check | ArrDelay distribution: mean=9.03 stddev=59.29 min=-67.00 max=2303.00 p50=-5.00 p95=89.00
+2026-11-21 10:59:42 [INFO] src.data.preprocessing — === Weather Standardisation ===
+2026-11-21 10:59:42 [INFO] src.data.preprocessing — Parsing NOAA PSV files…
+2026-11-21 10:59:43 [INFO] src.data.preprocessing — Parsed NOAA ATL: 13,149 rows
+2026-11-21 10:59:43 [INFO] src.data.preprocessing — Parsed NOAA CLT: 13,250 rows
+2026-11-21 10:59:43 [INFO] src.data.preprocessing — Parsed NOAA DEN: 13,325 rows
+2026-11-21 10:59:43 [INFO] src.data.preprocessing — Parsed NOAA DFW: 12,892 rows
+2026-11-21 10:59:43 [INFO] src.data.preprocessing — Parsed NOAA LAS: 11,930 rows
+2026-11-21 10:59:43 [INFO] src.data.preprocessing — Parsed NOAA LAX: 13,715 rows
+2026-11-21 10:59:43 [INFO] src.data.preprocessing — Parsed NOAA MCO: 13,081 rows
+2026-11-21 10:59:43 [INFO] src.data.preprocessing — Parsed NOAA ORD: 13,532 rows
+2026-11-21 10:59:44 [INFO] src.data.preprocessing — Parsed NOAA PHX: 11,963 rows
+2026-11-21 10:59:44 [INFO] src.data.preprocessing — Parsed NOAA SEA: 13,620 rows
+2026-11-21 10:59:44 [INFO] src.data.preprocessing — Canonical weather table: 130,457 rows → /app/data/processed/noaa_hourly_2025.parquet
+2026-11-21 10:59:44 [INFO] src.data.preprocessing — === Storm Events Standardisation ===
+2026-11-21 10:59:44 [INFO] src.data.preprocessing — Parsing NOAA Storm Events…
+/app/src/data/preprocessing.py:314: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+  df["event_dt"] = pd.to_datetime(df["BEGIN_DATE_TIME"], errors="coerce")
+2026-11-21 10:59:45 [INFO] src.data.preprocessing — Storm events table: 1,379 events at 9 airports → /app/data/processed/storm_events_2025.parquet
+2026-11-21 10:59:45 [INFO] main — ============================================================
+2026-11-21 10:59:45 [INFO] main — STEP 3 — Feature Engineering
+2026-11-21 10:59:45 [INFO] main — ============================================================
+2026-11-21 10:59:46 [INFO] src.features.engineering — === Feature Engineering ===
+2026-11-21 10:59:46 [INFO] src.features.engineering — Adding operational features (UTC, congestion, rotation delay)
+2026-11-21 10:59:46 [INFO] src.features.engineering — Joining weather observations
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather join: total flights joined = 465685
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather join: flights with weather_available == 1 = 465677
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather join: coverage = 100.00%
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [ATL]: 47844 / 47844 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [CLT]: 29350 / 29350 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [DEN]: 55297 / 55297 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [DFW]: 49588 / 49588 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [LAS]: 47439 / 47441 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [LAX]: 55677 / 55683 (99.99%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [MCO]: 36160 / 36160 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [ORD]: 51695 / 51695 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [PHX]: 49077 / 49077 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Weather coverage [SEA]: 43550 / 43550 (100.00%)
+2026-11-21 11:01:34 [INFO] src.features.engineering — Deriving aviation features and labels
+2026-11-21 11:01:35 [INFO] src.features.engineering — Computing delay-cause daily aggregates
+2026-11-21 11:01:35 [INFO] src.features.engineering — Added 10 delay-cause daily aggregate features (leakage-safe, capped at T-2h)
+2026-11-21 11:01:35 [INFO] src.features.engineering — Adding contextual features (storm events + holidays)
+2026-11-21 11:01:35 [INFO] src.features.engineering — Joining storm event counts
+2026-11-21 11:01:35 [INFO] src.features.engineering — Storm event features added
+2026-11-21 11:01:35 [INFO] src.features.engineering — Adding holiday flags (14 holidays, 42 adjacent dates)
+26/11/21 11:01:35 WARN SparkStringUtils: Truncated the string representation of a plan since it was too large. This behavior can be adjusted by setting 'spark.sql.debug.maxToStringFields'.
+2026-11-21 11:03:17 [INFO] src.features.engineering — Features cached: 465,685 rows
+2026-11-21 11:03:28 [INFO] src.features.engineering — Saved feature set: /app/data/features/departure_bts_only
+2026-11-21 11:03:37 [INFO] src.features.engineering — Saved feature set: /app/data/features/departure_bts_weather
+2026-11-21 11:03:44 [INFO] src.features.engineering — Saved feature set: /app/data/features/departure_full
+2026-11-21 11:03:54 [INFO] src.features.engineering — Saved feature set: /app/data/features/arrival_bts_only
+2026-11-21 11:04:02 [INFO] src.features.engineering — Saved feature set: /app/data/features/arrival_bts_weather
+2026-11-21 11:04:15 [INFO] src.features.engineering — Saved feature set: /app/data/features/arrival_full
+2026-11-21 11:04:15 [INFO] main — ============================================================
+2026-11-21 11:04:15 [INFO] main — STEP 4 — Ablation Experiments
+2026-11-21 11:04:15 [INFO] main — ============================================================
+2026-11-21 11:04:15 [INFO] src.models.ablation —   DEPARTURE | bts_only | MeanBaseline…
+2026-11-21 11:04:16 [INFO] src.models.ablation —     MeanBaseline: train mean of DepDelay = 15.6940
+2026-11-21 11:04:19 [INFO] src.models.ablation —   DEPARTURE | bts_only | LinearRegression…
+2026-11-21 11:04:19 [INFO] src.models.pipeline — Imputing 0/6 numeric columns with nulls: []
+26/11/21 11:04:27 WARN InstanceBuilder: Failed to load implementation from:dev.ludovic.netlib.blas.JNIBLAS
+26/11/21 11:04:27 WARN InstanceBuilder: Failed to load implementation from:dev.ludovic.netlib.lapack.JNILAPACK
+2026-11-21 11:04:40 [INFO] src.models.ablation —     best TVS MAE=24.770 params={'regParam': 0.01, 'maxIter': 25}
+2026-11-21 11:04:46 [INFO] src.models.ablation —     model saved → /app/models/departure_bts_only_LinearRegression
+2026-11-21 11:04:46 [INFO] src.models.ablation —   DEPARTURE | bts_only | RandomForest…
+2026-11-21 11:04:46 [INFO] src.models.pipeline — Imputing 0/6 numeric columns with nulls: []
+26/11/21 11:05:00 WARN DAGScheduler: Broadcasting large task binary with size 1053.8 KiB
+26/11/21 11:05:11 WARN DAGScheduler: Broadcasting large task binary with size 1057.2 KiB
+26/11/21 11:05:13 WARN DAGScheduler: Broadcasting large task binary with size 1955.1 KiB
+26/11/21 11:05:22 WARN DAGScheduler: Broadcasting large task binary with size 1039.5 KiB
+26/11/21 11:05:24 WARN DAGScheduler: Broadcasting large task binary with size 1926.7 KiB
+2026-11-21 11:05:28 [INFO] src.models.ablation —     best TVS MAE=24.313 params={'numTrees': 40, 'maxDepth': 8}
+2026-11-21 11:05:43 [INFO] src.models.ablation —     model saved → /app/models/departure_bts_only_RandomForest
+2026-11-21 11:05:43 [INFO] src.models.ablation —   DEPARTURE | bts_only | GBTRegressor…
+2026-11-21 11:05:43 [INFO] src.models.pipeline — Imputing 0/6 numeric columns with nulls: []
+2026-11-21 11:07:17 [INFO] src.models.ablation —     best TVS MAE=24.034 params={'maxIter': 25, 'maxDepth': 6}
+2026-11-21 11:07:22 [INFO] src.models.ablation —     model saved → /app/models/departure_bts_only_GBTRegressor
+2026-11-21 11:07:22 [INFO] src.models.ablation —   DEPARTURE | bts_weather | MeanBaseline…
+2026-11-21 11:07:23 [INFO] src.models.ablation —     MeanBaseline: train mean of DepDelay = 15.6940
+2026-11-21 11:07:24 [INFO] src.models.ablation —   DEPARTURE | bts_weather | LinearRegression…
+2026-11-21 11:07:25 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:07:39 [INFO] src.models.ablation —     best TVS MAE=24.732 params={'regParam': 1.0, 'maxIter': 25}
+2026-11-21 11:07:45 [INFO] src.models.ablation —     model saved → /app/models/departure_bts_weather_LinearRegression
+2026-11-21 11:07:45 [INFO] src.models.ablation —   DEPARTURE | bts_weather | RandomForest…
+2026-11-21 11:07:45 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+26/11/21 11:07:56 WARN DAGScheduler: Broadcasting large task binary with size 1083.1 KiB
+26/11/21 11:08:11 WARN DAGScheduler: Broadcasting large task binary with size 1104.1 KiB
+26/11/21 11:08:13 WARN DAGScheduler: Broadcasting large task binary with size 1995.5 KiB
+26/11/21 11:08:24 WARN DAGScheduler: Broadcasting large task binary with size 1098.0 KiB
+26/11/21 11:08:26 WARN DAGScheduler: Broadcasting large task binary with size 2005.0 KiB
+2026-11-21 11:08:29 [INFO] src.models.ablation —     best TVS MAE=24.231 params={'numTrees': 40, 'maxDepth': 8}
+2026-11-21 11:08:38 [INFO] src.models.ablation —     model saved → /app/models/departure_bts_weather_RandomForest
+2026-11-21 11:08:38 [INFO] src.models.ablation —   DEPARTURE | bts_weather | GBTRegressor…
+2026-11-21 11:08:39 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:09:45 [INFO] src.models.ablation —     best TVS MAE=23.916 params={'maxIter': 25, 'maxDepth': 6}
+2026-11-21 11:09:52 [INFO] src.models.ablation —     model saved → /app/models/departure_bts_weather_GBTRegressor
+2026-11-21 11:09:52 [INFO] src.models.ablation —   DEPARTURE | full | MeanBaseline…
+2026-11-21 11:09:53 [INFO] src.models.ablation —     MeanBaseline: train mean of DepDelay = 15.6940
+2026-11-21 11:09:54 [INFO] src.models.ablation —   DEPARTURE | full | LinearRegression…
+2026-11-21 11:09:55 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:10:10 [INFO] src.models.ablation —     best TVS MAE=24.665 params={'regParam': 1.0, 'maxIter': 50}
+2026-11-21 11:10:15 [INFO] src.models.ablation —     model saved → /app/models/departure_full_LinearRegression
+2026-11-21 11:10:15 [INFO] src.models.ablation —   DEPARTURE | full | RandomForest…
+2026-11-21 11:10:15 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+26/11/21 11:10:33 WARN DAGScheduler: Broadcasting large task binary with size 1137.7 KiB
+26/11/21 11:10:49 WARN DAGScheduler: Broadcasting large task binary with size 1183.8 KiB
+26/11/21 11:10:51 WARN DAGScheduler: Broadcasting large task binary with size 2.1 MiB
+26/11/21 11:11:03 WARN DAGScheduler: Broadcasting large task binary with size 1156.0 KiB
+26/11/21 11:11:04 WARN DAGScheduler: Broadcasting large task binary with size 2.0 MiB
+2026-11-21 11:11:09 [INFO] src.models.ablation —     best TVS MAE=24.064 params={'numTrees': 40, 'maxDepth': 8}
+2026-11-21 11:11:24 [INFO] src.models.ablation —     model saved → /app/models/departure_full_RandomForest
+2026-11-21 11:11:24 [INFO] src.models.ablation —   DEPARTURE | full | GBTRegressor…
+2026-11-21 11:11:24 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:12:55 [INFO] src.models.ablation —     best TVS MAE=23.753 params={'maxIter': 25, 'maxDepth': 6}
+2026-11-21 11:13:11 [INFO] src.models.ablation —     model saved → /app/models/departure_full_GBTRegressor
+2026-11-21 11:13:11 [INFO] src.models.ablation —   ARRIVAL | bts_only | MeanBaseline…
+2026-11-21 11:13:11 [INFO] src.models.ablation —     MeanBaseline: train mean of ArrDelay = 10.1150
+2026-11-21 11:13:13 [INFO] src.models.ablation —   ARRIVAL | bts_only | LinearRegression…
+2026-11-21 11:13:13 [INFO] src.models.pipeline — Imputing 0/6 numeric columns with nulls: []
+2026-11-21 11:13:27 [INFO] src.models.ablation —     best TVS MAE=28.225 params={'regParam': 1.0, 'maxIter': 25}
+2026-11-21 11:13:36 [INFO] src.models.ablation —     model saved → /app/models/arrival_bts_only_LinearRegression
+2026-11-21 11:13:36 [INFO] src.models.ablation —   ARRIVAL | bts_only | RandomForest…
+2026-11-21 11:13:36 [INFO] src.models.pipeline — Imputing 0/6 numeric columns with nulls: []
+26/11/21 11:13:48 WARN DAGScheduler: Broadcasting large task binary with size 1044.1 KiB
+26/11/21 11:14:05 WARN DAGScheduler: Broadcasting large task binary with size 1053.0 KiB
+26/11/21 11:14:08 WARN DAGScheduler: Broadcasting large task binary with size 1956.4 KiB
+26/11/21 11:14:22 WARN DAGScheduler: Broadcasting large task binary with size 1036.5 KiB
+26/11/21 11:14:25 WARN DAGScheduler: Broadcasting large task binary with size 1921.6 KiB
+2026-11-21 11:14:28 [INFO] src.models.ablation —     best TVS MAE=27.546 params={'numTrees': 40, 'maxDepth': 8}
+2026-11-21 11:14:39 [INFO] src.models.ablation —     model saved → /app/models/arrival_bts_only_RandomForest
+2026-11-21 11:14:39 [INFO] src.models.ablation —   ARRIVAL | bts_only | GBTRegressor…
+2026-11-21 11:14:39 [INFO] src.models.pipeline — Imputing 0/6 numeric columns with nulls: []
+2026-11-21 11:16:04 [INFO] src.models.ablation —     best TVS MAE=27.290 params={'maxIter': 25, 'maxDepth': 6}
+2026-11-21 11:16:16 [INFO] src.models.ablation —     model saved → /app/models/arrival_bts_only_GBTRegressor
+2026-11-21 11:16:17 [INFO] src.models.ablation —   ARRIVAL | bts_weather | MeanBaseline…
+2026-11-21 11:16:20 [INFO] src.models.ablation —     MeanBaseline: train mean of ArrDelay = 10.1150
+2026-11-21 11:16:22 [INFO] src.models.ablation —   ARRIVAL | bts_weather | LinearRegression…
+2026-11-21 11:16:23 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:16:40 [INFO] src.models.ablation —     best TVS MAE=28.085 params={'regParam': 1.0, 'maxIter': 50}
+2026-11-21 11:16:47 [INFO] src.models.ablation —     model saved → /app/models/arrival_bts_weather_LinearRegression
+2026-11-21 11:16:47 [INFO] src.models.ablation —   ARRIVAL | bts_weather | RandomForest…
+2026-11-21 11:16:47 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+26/11/21 11:17:06 WARN DAGScheduler: Broadcasting large task binary with size 1083.9 KiB
+26/11/21 11:17:37 WARN DAGScheduler: Broadcasting large task binary with size 1095.8 KiB
+26/11/21 11:17:40 WARN DAGScheduler: Broadcasting large task binary with size 1973.6 KiB
+26/11/21 11:17:57 WARN DAGScheduler: Broadcasting large task binary with size 1076.6 KiB
+2026-11-21 11:17:59 [INFO] src.models.ablation —     best TVS MAE=27.352 params={'numTrees': 20, 'maxDepth': 8}
+2026-11-21 11:18:15 [INFO] src.models.ablation —     model saved → /app/models/arrival_bts_weather_RandomForest
+2026-11-21 11:18:15 [INFO] src.models.ablation —   ARRIVAL | bts_weather | GBTRegressor…
+2026-11-21 11:18:16 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:19:36 [INFO] src.models.ablation —     best TVS MAE=27.053 params={'maxIter': 25, 'maxDepth': 6}
+2026-11-21 11:19:46 [INFO] src.models.ablation —     model saved → /app/models/arrival_bts_weather_GBTRegressor
+2026-11-21 11:19:46 [INFO] src.models.ablation —   ARRIVAL | full | MeanBaseline…
+2026-11-21 11:19:49 [INFO] src.models.ablation —     MeanBaseline: train mean of ArrDelay = 10.1150
+2026-11-21 11:19:52 [INFO] src.models.ablation —   ARRIVAL | full | LinearRegression…
+2026-11-21 11:19:52 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:20:09 [INFO] src.models.ablation —     best TVS MAE=28.006 params={'regParam': 1.0, 'maxIter': 25}
+2026-11-21 11:20:19 [INFO] src.models.ablation —     model saved → /app/models/arrival_full_LinearRegression
+2026-11-21 11:20:19 [INFO] src.models.ablation —   ARRIVAL | full | RandomForest…
+2026-11-21 11:20:19 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+26/11/21 11:20:33 WARN DAGScheduler: Broadcasting large task binary with size 1137.8 KiB
+26/11/21 11:20:50 WARN DAGScheduler: Broadcasting large task binary with size 1183.7 KiB
+26/11/21 11:20:52 WARN DAGScheduler: Broadcasting large task binary with size 2.1 MiB
+26/11/21 11:21:06 WARN DAGScheduler: Broadcasting large task binary with size 1152.0 KiB
+26/11/21 11:21:08 WARN DAGScheduler: Broadcasting large task binary with size 2.0 MiB
+2026-11-21 11:21:11 [INFO] src.models.ablation —     best TVS MAE=27.137 params={'numTrees': 40, 'maxDepth': 8}
+2026-11-21 11:21:32 [INFO] src.models.ablation —     model saved → /app/models/arrival_full_RandomForest
+2026-11-21 11:21:32 [INFO] src.models.ablation —   ARRIVAL | full | GBTRegressor…
+2026-11-21 11:21:32 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+26/11/21 11:22:09 WARN BlockManagerMaster: Failed to remove broadcast 12199 with removeFromMaster = true - Block broadcast_12199 does not exist
+org.apache.spark.SparkException: Block broadcast_12199 does not exist
+	at org.apache.spark.errors.SparkCoreErrors$.blockDoesNotExistError(SparkCoreErrors.scala:322)
+	at org.apache.spark.storage.BlockInfoManager.blockInfo(BlockInfoManager.scala:269)
+	at org.apache.spark.storage.BlockInfoManager.removeBlock(BlockInfoManager.scala:547)
+	at org.apache.spark.storage.BlockManager.removeBlockInternal(BlockManager.scala:2137)
+	at org.apache.spark.storage.BlockManager.removeBlock(BlockManager.scala:2100)
+	at org.apache.spark.storage.BlockManager.$anonfun$removeBroadcast$3(BlockManager.scala:2071)
+	at org.apache.spark.storage.BlockManager.$anonfun$removeBroadcast$3$adapted(BlockManager.scala:2071)
+	at scala.collection.IterableOnceOps.foreach(IterableOnce.scala:619)
+	at scala.collection.IterableOnceOps.foreach$(IterableOnce.scala:617)
+	at scala.collection.AbstractIterator.foreach(Iterator.scala:1306)
+	at org.apache.spark.storage.BlockManager.removeBroadcast(BlockManager.scala:2071)
+	at org.apache.spark.storage.BlockManagerStorageEndpoint$$anonfun$receiveAndReply$1.$anonfun$applyOrElse$5(BlockManagerStorageEndpoint.scala:77)
+	at scala.runtime.java8.JFunction0$mcI$sp.apply(JFunction0$mcI$sp.scala:17)
+	at org.apache.spark.storage.BlockManagerStorageEndpoint.$anonfun$doAsync$1(BlockManagerStorageEndpoint.scala:111)
+	at scala.concurrent.Future$.$anonfun$apply$1(Future.scala:687)
+	at scala.concurrent.impl.Promise$Transformation.run(Promise.scala:467)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+2026-11-21 11:23:19 [INFO] src.models.ablation —     best TVS MAE=26.862 params={'maxIter': 25, 'maxDepth': 6}
+2026-11-21 11:23:36 [INFO] src.models.ablation —     model saved → /app/models/arrival_full_GBTRegressor
+2026-11-21 11:23:36 [INFO] src.models.ablation — Ablation summary saved → /app/results/controlled_ablation_summary.csv
+2026-11-21 11:23:36 [INFO] main — Ablation summary:\n     Task   Condition        Algorithm  Test_MAE_min  Test_RMSE_min  Test_R2  Val_MAE_min  Val_RMSE_min  Val_R2\ndeparture    bts_only     MeanBaseline         26.75          56.59  -0.0003        24.70         50.59 -0.0094\ndeparture    bts_only LinearRegression         26.68          56.26   0.0116        24.37         50.30  0.0020\ndeparture    bts_only     RandomForest         24.14          56.10   0.0172        21.63         49.37  0.0386\ndeparture    bts_only     GBTRegressor         23.62          56.91  -0.0116        20.33         48.70  0.0647\ndeparture bts_weather     MeanBaseline         26.75          56.59  -0.0003        24.70         50.59 -0.0094\ndeparture bts_weather LinearRegression         23.14          56.53   0.0020        23.04         50.04  0.0122\ndeparture bts_weather     RandomForest         24.19          56.08   0.0177        21.82         48.94  0.0553\ndeparture bts_weather     GBTRegressor         23.50          56.14   0.0155        20.24         48.24  0.0820\ndeparture        full     MeanBaseline         26.75          56.59  -0.0003        24.70         50.59 -0.0094\ndeparture        full LinearRegression         23.33          56.47   0.0040        22.97         49.89  0.0182\ndeparture        full     RandomForest         24.01          56.11   0.0167        21.54         48.50  0.0721\ndeparture        full     GBTRegressor         23.40          56.31   0.0098        20.21         48.12  0.0865\n  arrival    bts_only     MeanBaseline         29.83          59.11  -0.0006        27.23         52.60 -0.0098\n  arrival    bts_only LinearRegression         30.47          58.92   0.0060        27.43         52.37 -0.0007\n  arrival    bts_only     RandomForest         27.79          58.56   0.0178        24.60         51.34  0.0380\n  arrival    bts_only     GBTRegressor         27.68          58.78   0.0106        23.57         50.85  0.0565\n  arrival bts_weather     MeanBaseline         29.83          59.11  -0.0006        27.23         52.60 -0.0098\n  arrival bts_weather LinearRegression         27.09          59.00   0.0031        26.14         52.03  0.0122\n  arrival bts_weather     RandomForest         27.48          58.56   0.0181        24.60         50.82  0.0574\n  arrival bts_weather     GBTRegressor         27.57          58.48   0.0206        23.50         50.19  0.0808\n  arrival        full     MeanBaseline         29.83          59.11  -0.0006        27.23         52.60 -0.0098\n  arrival        full LinearRegression         27.28          58.96   0.0044        26.06         51.85  0.0189\n  arrival        full     RandomForest         27.54          58.43   0.0223        24.55         50.48  0.0700\n  arrival        full     GBTRegressor         27.53          61.48  -0.0823        23.44         49.94  0.0899
+2026-11-21 11:23:36 [INFO] main — ============================================================
+2026-11-21 11:23:36 [INFO] main — STEP 5 — Two-Stage Hurdle Model
+2026-11-21 11:23:36 [INFO] main — ============================================================
+2026-11-21 11:23:36 [INFO] src.models.hurdle — Training hurdle model: DEPARTURE (bts_weather)…
+2026-11-21 11:23:38 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:23:58 [INFO] src.models.hurdle —   classifier saved → /app/models/hurdle_departure_bts_weather_classifier
+2026-11-21 11:23:59 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:24:32 [INFO] src.models.hurdle —   regressor saved → /app/models/hurdle_departure_bts_weather_regressor
+2026-11-21 11:24:39 [INFO] src.models.hurdle — Training hurdle model: DEPARTURE (full)…
+2026-11-21 11:24:41 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:24:57 [INFO] src.models.hurdle —   classifier saved → /app/models/hurdle_departure_full_classifier
+2026-11-21 11:24:57 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:25:17 [INFO] src.models.hurdle —   regressor saved → /app/models/hurdle_departure_full_regressor
+2026-11-21 11:25:20 [INFO] src.models.hurdle — Training hurdle model: ARRIVAL (bts_weather)…
+2026-11-21 11:25:22 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:25:31 [INFO] src.models.hurdle —   classifier saved → /app/models/hurdle_arrival_bts_weather_classifier
+2026-11-21 11:25:32 [INFO] src.models.pipeline — Imputing 6/16 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:25:47 [INFO] src.models.hurdle —   regressor saved → /app/models/hurdle_arrival_bts_weather_regressor
+2026-11-21 11:25:51 [INFO] src.models.hurdle — Training hurdle model: ARRIVAL (full)…
+2026-11-21 11:25:52 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:26:01 [INFO] src.models.hurdle —   classifier saved → /app/models/hurdle_arrival_full_classifier
+2026-11-21 11:26:02 [INFO] src.models.pipeline — Imputing 6/30 numeric columns with nulls: ['w_temp', 'w_dew', 'w_wspeed', 'w_slp', 'weather_crosswind', 'weather_headwind']
+2026-11-21 11:26:20 [INFO] src.models.hurdle —   regressor saved → /app/models/hurdle_arrival_full_regressor
+2026-11-21 11:26:23 [INFO] src.models.hurdle — Hurdle results saved → /app/results/two_stage_hurdle_results.csv
+2026-11-21 11:26:24 [INFO] main — Hurdle summary:\n     Task   Condition  Stage1_ROC_AUC  TwoStage_MAE_min  TwoStage_RMSE_min  TwoStage_R2\ndeparture bts_weather          0.6628             23.60              56.20       0.0137\ndeparture        full          0.6612             23.51              56.25       0.0117\n  arrival bts_weather          0.6092             29.79              58.60       0.0167\n  arrival        full          0.6046             29.76              58.63       0.0155
+2026-11-21 11:26:24 [INFO] main — ============================================================
+2026-11-21 11:26:24 [INFO] main — STEP 6 — Feature Importances & Residual Analysis
+2026-11-21 11:26:24 [INFO] main — ============================================================
+2026-11-21 11:26:25 [INFO] src.analysis.feature_importance — Extracting importances: departure | bts_only | RandomForest
+2026-11-21 11:26:28 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_departure_bts_only_RandomForest.png
+2026-11-21 11:26:28 [INFO] src.analysis.feature_importance — Extracting importances: departure | bts_only | GBTRegressor
+2026-11-21 11:26:31 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_departure_bts_only_GBTRegressor.png
+2026-11-21 11:26:31 [INFO] src.analysis.feature_importance — Extracting importances: departure | bts_weather | RandomForest
+2026-11-21 11:26:34 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_departure_bts_weather_RandomForest.png
+2026-11-21 11:26:34 [INFO] src.analysis.feature_importance — Extracting importances: departure | bts_weather | GBTRegressor
+2026-11-21 11:26:36 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_departure_bts_weather_GBTRegressor.png
+2026-11-21 11:26:36 [INFO] src.analysis.feature_importance — Extracting importances: departure | full | RandomForest
+2026-11-21 11:26:38 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_departure_full_RandomForest.png
+2026-11-21 11:26:38 [INFO] src.analysis.feature_importance — Extracting importances: departure | full | GBTRegressor
+2026-11-21 11:26:40 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_departure_full_GBTRegressor.png
+2026-11-21 11:26:40 [INFO] src.analysis.feature_importance — Extracting importances: arrival | bts_only | RandomForest
+2026-11-21 11:26:41 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_arrival_bts_only_RandomForest.png
+2026-11-21 11:26:41 [INFO] src.analysis.feature_importance — Extracting importances: arrival | bts_only | GBTRegressor
+2026-11-21 11:26:42 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_arrival_bts_only_GBTRegressor.png
+2026-11-21 11:26:42 [INFO] src.analysis.feature_importance — Extracting importances: arrival | bts_weather | RandomForest
+2026-11-21 11:26:44 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_arrival_bts_weather_RandomForest.png
+2026-11-21 11:26:44 [INFO] src.analysis.feature_importance — Extracting importances: arrival | bts_weather | GBTRegressor
+2026-11-21 11:26:46 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_arrival_bts_weather_GBTRegressor.png
+2026-11-21 11:26:46 [INFO] src.analysis.feature_importance — Extracting importances: arrival | full | RandomForest
+2026-11-21 11:26:48 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_arrival_full_RandomForest.png
+2026-11-21 11:26:48 [INFO] src.analysis.feature_importance — Extracting importances: arrival | full | GBTRegressor
+2026-11-21 11:26:50 [INFO] src.analysis.feature_importance — Feature importance plot saved → /app/results/feat_importance_arrival_full_GBTRegressor.png
+2026-11-21 11:26:50 [INFO] src.analysis.feature_importance — All feature importances saved → /app/results/feature_importances.csv
+2026-11-21 11:26:50 [INFO] src.analysis.residuals — Residual analysis: departure | bts_only | RandomForest
+2026-11-21 11:26:53 [INFO] src.analysis.residuals —   Residual plots saved for departure_bts_only_RandomForest
+2026-11-21 11:26:53 [INFO] src.analysis.residuals — Residual analysis: departure | bts_only | GBTRegressor
+2026-11-21 11:26:55 [INFO] src.analysis.residuals —   Residual plots saved for departure_bts_only_GBTRegressor
+2026-11-21 11:26:55 [INFO] src.analysis.residuals — Residual analysis: departure | bts_weather | RandomForest
+2026-11-21 11:26:58 [INFO] src.analysis.residuals —   Residual plots saved for departure_bts_weather_RandomForest
+2026-11-21 11:26:58 [INFO] src.analysis.residuals — Residual analysis: departure | bts_weather | GBTRegressor
+2026-11-21 11:27:00 [INFO] src.analysis.residuals —   Residual plots saved for departure_bts_weather_GBTRegressor
+2026-11-21 11:27:00 [INFO] src.analysis.residuals — Residual analysis: departure | full | RandomForest
+2026-11-21 11:27:03 [INFO] src.analysis.residuals —   Residual plots saved for departure_full_RandomForest
+2026-11-21 11:27:03 [INFO] src.analysis.residuals — Residual analysis: departure | full | GBTRegressor
+2026-11-21 11:27:06 [INFO] src.analysis.residuals —   Residual plots saved for departure_full_GBTRegressor
+2026-11-21 11:27:08 [INFO] src.analysis.residuals — Hurdle calibration plot saved → /app/results/hurdle_calibration_departure_bts_weather.png
+2026-11-21 11:27:11 [INFO] src.analysis.residuals — Hurdle calibration plot saved → /app/results/hurdle_calibration_departure_full.png
+2026-11-21 11:27:11 [INFO] src.analysis.residuals — Residual analysis: arrival | bts_only | RandomForest
+2026-11-21 11:27:13 [INFO] src.analysis.residuals —   Residual plots saved for arrival_bts_only_RandomForest
+2026-11-21 11:27:13 [INFO] src.analysis.residuals — Residual analysis: arrival | bts_only | GBTRegressor
+2026-11-21 11:27:16 [INFO] src.analysis.residuals —   Residual plots saved for arrival_bts_only_GBTRegressor
+2026-11-21 11:27:16 [INFO] src.analysis.residuals — Residual analysis: arrival | bts_weather | RandomForest
+2026-11-21 11:27:19 [INFO] src.analysis.residuals —   Residual plots saved for arrival_bts_weather_RandomForest
+2026-11-21 11:27:19 [INFO] src.analysis.residuals — Residual analysis: arrival | bts_weather | GBTRegressor
+2026-11-21 11:27:21 [INFO] src.analysis.residuals —   Residual plots saved for arrival_bts_weather_GBTRegressor
+2026-11-21 11:27:21 [INFO] src.analysis.residuals — Residual analysis: arrival | full | RandomForest
+2026-11-21 11:27:24 [INFO] src.analysis.residuals —   Residual plots saved for arrival_full_RandomForest
+2026-11-21 11:27:24 [INFO] src.analysis.residuals — Residual analysis: arrival | full | GBTRegressor
+2026-11-21 11:27:27 [INFO] src.analysis.residuals —   Residual plots saved for arrival_full_GBTRegressor
+2026-11-21 11:27:28 [INFO] src.analysis.residuals — Hurdle calibration plot saved → /app/results/hurdle_calibration_arrival_bts_weather.png
+2026-11-21 11:27:31 [INFO] src.analysis.residuals — Hurdle calibration plot saved → /app/results/hurdle_calibration_arrival_full.png
+2026-11-21 11:27:31 [INFO] src.analysis.residuals — Residual analysis complete.
+2026-11-21 11:27:31 [INFO] main — Pipeline complete.

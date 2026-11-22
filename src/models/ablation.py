@@ -8,12 +8,15 @@ across three feature conditions (bts_only, bts_weather, full) and two
 prediction targets (departure delay, arrival delay), plus a train-mean
 baseline for each target.
 
-Each algorithm is tuned with TrainValidationSplit over a parameter grid
-(see LR_PARAM_GRID / RF_PARAM_GRID / GBT_PARAM_GRID in config.settings) and
-the best model is evaluated on both the test and validation partitions and
-saved to disk.
+Each algorithm is tuned chronologically over a parameter grid (see
+LR_PARAM_GRID / RF_PARAM_GRID / GBT_PARAM_GRID in config.settings): every
+setting is trained on the train months (Jan-Aug) and scored on the
+validation months (Sep-Oct); the setting with the lowest validation MAE is
+refit on train + validation (Jan-Oct), evaluated on the test months
+(Nov-Dec) and saved to disk.
 
-Metrics reported: MAE, RMSE, R²  (test and validation partitions).
+Metrics reported: MAE, RMSE, R².  Val_* come from the train-only model of
+the best setting; Test_* come from the refit model.
 
 Public API
 ----------
@@ -23,7 +26,7 @@ Public API
 import pandas as pd
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.regression import GBTRegressor, LinearRegression, RandomForestRegressor
-from pyspark.ml.tuning import ParamGridBuilder, TrainValidationSplit
+from pyspark.ml.tuning import ParamGridBuilder
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
@@ -166,37 +169,32 @@ def run_ablation(
                 pipe = build_pipeline(p_cols, estimator, df=train_df)
                 grid = _build_param_grid(estimator, param_grid)
 
-                # Use TrainValidationSplit instead of CrossValidator to
-                # respect the chronological ordering.  Spark's TVS does a
-                # single random split, but we combine train + val and set
-                # trainRatio = 8/10 (≈ the Jan-Aug / Sep-Oct boundary) so
-                # the held-out 20 % approximates the temporal validation
-                # set without shuffling future data into training folds.
-                train_val_df = train_df.union(val_df)
-                tvs = TrainValidationSplit(
-                    estimator=pipe,
-                    estimatorParamMaps=grid,
-                    evaluator=RegressionEvaluator(
-                        labelCol=target_col, metricName="mae"
-                    ),
-                    trainRatio=0.8,
-                    seed=42,
-                )
-                tvs_model = tvs.fit(train_val_df)
-                model = tvs_model.bestModel
-
-                best_idx = min(
-                    range(len(tvs_model.validationMetrics)),
-                    key=lambda i: tvs_model.validationMetrics[i],
-                )
+                # Chronological tuning: fit each grid setting on train
+                # (Jan-Aug), score MAE on validation (Sep-Oct), keep the best.
+                # Val_* metrics therefore come from a model that never saw
+                # the validation months.
+                best_params, best_val_metrics = None, None
+                for params in grid:
+                    val_metrics_i = _score(
+                        pipe.fit(train_df, params).transform(val_df), target_col
+                    )
+                    logger.info(
+                        "    params=%s  val MAE=%.3f",
+                        {p.name: v for p, v in params.items()}, val_metrics_i[0],
+                    )
+                    if best_val_metrics is None or val_metrics_i[0] < best_val_metrics[0]:
+                        best_params, best_val_metrics = params, val_metrics_i
                 logger.info(
-                    "    best TVS MAE=%.3f params=%s",
-                    tvs_model.validationMetrics[best_idx],
-                    {p.name: v for p, v in grid[best_idx].items()},
+                    "    best val MAE=%.3f params=%s",
+                    best_val_metrics[0], {p.name: v for p, v in best_params.items()},
                 )
+
+                # Refit the best setting on train + validation (Jan-Oct) and
+                # evaluate once on the untouched test months (Nov-Dec).
+                model = pipe.fit(train_df.union(val_df), best_params)
 
                 test_metrics = _score(model.transform(test_df), target_col)
-                val_metrics  = _score(model.transform(val_df),  target_col)
+                val_metrics  = best_val_metrics
                 results.append(
                     _result_row(task, condition, algo_name, test_metrics, val_metrics)
                 )
