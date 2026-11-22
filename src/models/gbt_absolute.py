@@ -11,7 +11,10 @@ on Jan-Oct and scored once on test (Nov-Dec). Test MAE gets a 95% day-block
 bootstrap interval for the difference to the train-median baseline.
 
   python -m src.models.gbt_absolute            (repo root, local Spark)
+  spark-submit --master spark://... src/models/gbt_absolute.py   (cluster)
 Writes results/gbt_absolute_loss_results.csv and models/<task>_full_GBTAbsolute.
+Data and model folders come from config.settings.PATHS; FDP_DATA / FDP_MODELS
+override them (e.g. to read the cluster volumes from a local run).
 """
 import itertools
 import os
@@ -27,12 +30,12 @@ sys.path.insert(0, str(ROOT))
 from pyspark.ml.regression import GBTRegressor  # noqa: E402
 from pyspark.sql import SparkSession, functions as F  # noqa: E402
 
-from config.settings import FULL_FEATURE_COLS  # noqa: E402
+from config.settings import FULL_FEATURE_COLS, PATHS  # noqa: E402
 from src.models.pipeline import build_pipeline  # noqa: E402
 
-DATA = Path(os.environ.get("FDP_DATA", ROOT / "spark_docker/volumes/data"))
-MODELS = Path(os.environ.get("FDP_MODELS", ROOT / "spark_docker/volumes/models"))
-OUT = ROOT / "results/gbt_absolute_loss_results.csv"
+FEATURES = Path(os.environ["FDP_DATA"]) / "features" if "FDP_DATA" in os.environ else PATHS["features"]
+MODELS = Path(os.environ.get("FDP_MODELS", PATHS["models"]))
+OUT = PATHS["results"] / "gbt_absolute_loss_results.csv"
 GRID = {"maxIter": [50, 100], "maxDepth": [4, 6], "stepSize": [0.1, 0.3]}
 N_BOOT, SEED = 1000, 42
 
@@ -57,14 +60,16 @@ def day_block_ci(pdf, a, b):
 
 
 def main():
-    spark = (SparkSession.builder.master("local[*]").appName("gbt-absolute")
-             .config("spark.driver.memory", "8g")
-             .config("spark.sql.shuffle.partitions", "32")
-             .getOrCreate())
+    builder = SparkSession.builder.appName("gbt-absolute").config("spark.sql.shuffle.partitions", "32")
+    if "PYSPARK_GATEWAY_PORT" not in os.environ:
+        # plain `python -m ...` -> local mode; spark-submit sets the gateway and --master
+        builder = builder.master("local[*]").config("spark.driver.memory", "8g")
+    spark = builder.getOrCreate()
+    print("master:", spark.sparkContext.master, "| features:", FEATURES, flush=True)
     spark.sparkContext.setLogLevel("ERROR")
     rows = []
     for task, tgt in [("departure", "DepDelay"), ("arrival", "ArrDelay")]:
-        ds = spark.read.parquet(str(DATA / f"features/{task}_full"))
+        ds = spark.read.parquet(str(FEATURES / f"{task}_full"))
         train = ds.filter("data_split = 'train'").cache()
         val = ds.filter("data_split = 'validation'").cache()
         test = ds.filter("data_split = 'test'").cache()
