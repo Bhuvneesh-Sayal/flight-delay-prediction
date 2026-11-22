@@ -35,8 +35,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 
-from config.settings import PATHS
+from config.settings import PATHS, YEAR
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -128,6 +129,61 @@ def _bench_join(spark: SparkSession, parquet_path: str, rows: int) -> float:
     return time.perf_counter() - start
 
 
+def _weather_asof_join(spark: SparkSession, parquet_path: str, rows: int,
+                       weather_path: str, broadcast: bool) -> float:
+    """
+    The pipeline's as-of weather join (flight x readings at the origin in
+    [T-8h, T-2h], keep the latest) with an explicit join strategy:
+
+    broadcast=True  — weather table (130 K rows) broadcast to every executor;
+                      no shuffle of the flight table.
+    broadcast=False — broadcasting disabled (static and AQE thresholds = -1),
+                      so Spark shuffles both sides on the equi-key (airport)
+                      and sort-merge joins them; only 10 airport keys exist.
+    """
+    keys = ["spark.sql.autoBroadcastJoinThreshold", "spark.sql.adaptive.autoBroadcastJoinThreshold"]
+    old = {k: spark.conf.get(k, None) for k in keys}
+    if not broadcast:
+        for k in keys:
+            spark.conf.set(k, "-1")
+    try:
+        flights = (
+            spark.read.parquet(parquet_path).limit(rows)
+            .select("flight_key", "Origin",
+                    F.expr("scheduled_departure_utc - INTERVAL 2 HOURS").alias("t2"))
+        )
+        weather = (
+            spark.read.parquet(weather_path)
+            .select(F.col("airport").alias("w_airport"),
+                    F.to_timestamp("weather_time_str", "yyyy-MM-dd HH:mm:ss").alias("w_time"),
+                    F.col("temperature").alias("w_temp"))
+        )
+        right = F.broadcast(weather) if broadcast else weather
+        cond = ((F.col("Origin") == F.col("w_airport")) &
+                (F.col("w_time") <= F.col("t2")) &
+                (F.col("w_time") >= F.expr("t2 - INTERVAL 6 HOURS")))
+        win = Window.partitionBy("flight_key").orderBy(F.col("w_time").desc_nulls_last())
+        query = (
+            flights.join(right, cond, "left")
+            .withColumn("rn", F.row_number().over(win)).filter("rn = 1")
+            .agg(F.count("*").alias("n"), F.avg("w_temp").alias("avg_temp"))
+        )
+        start = time.perf_counter()
+        query.collect()
+        elapsed = time.perf_counter() - start
+        plan = query._jdf.queryExecution().executedPlan().toString()
+        strategy = next((s for s in ("BroadcastHashJoin", "BroadcastNestedLoopJoin",
+                                     "SortMergeJoin", "ShuffledHashJoin") if s in plan), "unknown")
+        logger.info("    weather join strategy: %s", strategy)
+        return elapsed
+    finally:
+        for k, v in old.items():
+            if v is None:
+                spark.conf.unset(k)
+            else:
+                spark.conf.set(k, v)
+
+
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
@@ -199,10 +255,14 @@ def run_cluster_benchmarks(
         spark.sparkContext._jsc.sc().getExecutorMemoryStatus().size(),
     )
 
+    weather_path = str(paths["processed"] / f"noaa_hourly_{YEAR}.parquet")
     workloads = {
         "ShuffleAgg": _bench_shuffle_agg,
         "GlobalSort": _bench_sort,
         "HashJoin":   _bench_join,
+        # Join-strategy comparison on the real as-of weather join
+        "WeatherJoin_broadcast": lambda s, p, r: _weather_asof_join(s, p, r, weather_path, True),
+        "WeatherJoin_shuffle":   lambda s, p, r: _weather_asof_join(s, p, r, weather_path, False),
     }
 
     results: list = []

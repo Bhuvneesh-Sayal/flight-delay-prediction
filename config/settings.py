@@ -285,6 +285,12 @@ STREAMING_TRIGGER_SECONDS:   int = 5       # micro-batch interval (5 s for low-l
 STREAMING_INPUT_DIR:  Path = PROJECT_DIR / "data" / "streaming" / "input"  / "flights"
 STREAMING_OUTPUT_DIR: Path = PROJECT_DIR / "data" / "streaming" / "output" / "scores"
 STREAMING_CHECKPOINT: Path = PROJECT_DIR / "data" / "streaming" / "checkpoints"
+# Airport operational events received so far (departures, arrivals, flights
+# starting to wait); the stream rebuilds the same-day airport features from it.
+STREAMING_STATE_DIR:  Path = PROJECT_DIR / "data" / "streaming" / "state" / "airport_ops_events"
+# Hurdle model used for live scoring: "full" (all 34 features, best model)
+# or "bts_weather" (no same-day airport / storm / holiday features).
+STREAMING_MODEL_CONDITION: str = "full"
 
 # ---------------------------------------------------------------------------
 # Kafka settings  (KRaft mode — no Zookeeper)

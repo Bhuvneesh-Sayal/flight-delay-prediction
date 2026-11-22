@@ -196,13 +196,29 @@ def _join_weather(spark: SparkSession, flights, weather_parquet_path: Path) -> o
         F.col("sea_level_pressure").alias("w_slp"),
     )
 
+    # Bucketed range join. With Origin as the only equi-key (10 airports), Spark
+    # would pair every flight with all ~13 K readings of its airport and apply
+    # the time range afterwards (~6 billion pairs for the year). A reading at
+    # time w can only serve flights whose T-2h lies in [w, w + 6h], i.e. whose
+    # T-2h falls on date(w) or date(w + 6h); copying each reading to those
+    # date buckets and joining on (airport, bucket) leaves ~9 candidate
+    # readings per flight. The result is identical to the unbucketed join.
+    w_bucketed = w_clean.withColumn(
+        "w_bucket",
+        F.explode(F.array_distinct(F.array(
+            F.to_date("w_time_utc"),
+            F.to_date(F.expr("w_time_utc + INTERVAL 6 HOURS")),
+        ))),
+    )
+    flights = flights.withColumn("_t2_bucket", F.to_date("t_minus_2_utc"))
     join_cond = (
         (F.col("Origin") == F.col("w_airport")) &
+        (F.col("_t2_bucket") == F.col("w_bucket")) &
         (F.col("w_time_utc") <= F.col("t_minus_2_utc")) &
         (F.col("w_time_utc") >= F.expr("t_minus_2_utc - INTERVAL 6 HOURS"))
     )
 
-    matched = flights.join(w_clean, join_cond, "left")
+    matched = flights.join(w_bucketed, join_cond, "left").drop("_t2_bucket", "w_bucket")
 
     # Keep only the most recent observation per flight
     dedup_win = Window.partitionBy("flight_key").orderBy(
@@ -272,75 +288,64 @@ def _report_weather_coverage(flights, min_coverage: float = MIN_WEATHER_COVERAGE
 # Same-day airport delay picture, as known at T-2h
 # ---------------------------------------------------------------------------
 
-def _add_delay_cause_aggregates(flights) -> object:
+# Value columns carried by airport operational events (one running total each)
+OPS_VALUE_COLS: list = [
+    "dep_n", "del15_n", "dep_sum",
+    "nas_n", "nas_min", "wx_n", "wx_min", "cr_n", "la_n", "la_min",
+    "waiting",
+]
+
+
+def build_airport_ops_events(flights) -> object:
     """
-    Same-day picture of delays at the origin airport, as known at the
-    prediction time T-2h (``t_minus_2_utc``) of each flight.
+    Turn each flight into the "operational events" through which its delay
+    information becomes known at its origin airport:
 
-    Uses only earlier flights from the same Origin on the same local
-    FlightDate, and only information that existed by T-2h:
+    * ``dep``  at the ACTUAL departure (scheduled departure + DepDelay):
+      departure counted, delayed >15 min or not, its DepDelay; a late flight
+      also stops "waiting";
+    * ``arr``  at the ACTUAL arrival (scheduled departure + CRSElapsedTime +
+      ArrDelay): its delay-cause flags and minutes (BTS assigns causes at
+      arrival);
+    * ``wait`` at the scheduled departure, only for flights that left late:
+      the flight starts "waiting" (past schedule, still on the ground).
 
-    * departure delay of a flight is known once it has ACTUALLY departed
-      (scheduled departure + DepDelay <= T-2h) — feeds the delayed-flight
-      count, average delay and delay rate;
-    * delay-cause minutes (NAS, weather, carrier, late aircraft) are known
-      once the flight has ACTUALLY landed (scheduled departure +
-      CRSElapsedTime + ArrDelay <= T-2h), because BTS assigns causes at
-      arrival;
-    * ``airport_waiting_late_now``: flights already past their scheduled
-      departure but not yet departed at T-2h.
-
-    Each per-flight threshold differs, so a single window frame cannot
-    express it. Instead every flight contributes "event" rows at the times
-    its information becomes known, every flight also contributes one
-    "query" row at its own T-2h, and a running sum over time per
-    (Origin, FlightDate) is read off at the query rows.
+    Returns columns: src_flight_key, ops_kind, Origin, FlightDate,
+    event_time_sec, data_split (if present), and OPS_VALUE_COLS.
+    Used by batch feature engineering and replayed by the Kafka producer, so
+    the streaming pipeline sees exactly the same events.
     """
     sched_sec = F.col("scheduled_departure_utc").cast("long")
+    extra = ["data_split"] if "data_split" in flights.columns else []
     base = flights.select(
-        "flight_key", "Origin", "FlightDate",
+        "flight_key", "Origin", "FlightDate", *extra,
         sched_sec.alias("_sched_sec"),
-        F.col("t_minus_2_utc").cast("long").alias("_t2_sec"),
         "DepDelay", "ArrDelay", "CRSElapsedTime",
         "NASDelay", "WeatherDelay", "CarrierDelay", "LateAircraftDelay",
     )
+    flag = lambda cond: F.when(cond, 1.0).otherwise(0.0)  # noqa: E731
 
-    value_cols = [
-        "dep_n", "del15_n", "dep_sum",
-        "nas_n", "nas_min", "wx_n", "wx_min", "cr_n", "la_n", "la_min",
-        "waiting",
-    ]
-
-    def _rows(df, t_col, is_query, **values):
-        """Build union-compatible rows: key, time, query flag, value columns."""
+    def _rows(df, kind, t_col, **values):
         cols = [
-            F.col("Origin"), F.col("FlightDate"),
-            t_col.cast("long").alias("_t"),
-            F.lit(is_query).alias("_is_query"),
-            (F.col("flight_key") if is_query else F.lit(None).cast("long")).alias("_qkey"),
+            F.col("flight_key").alias("src_flight_key"),
+            F.lit(kind).alias("ops_kind"),
+            F.col("Origin"), F.col("FlightDate"), *[F.col(c) for c in extra],
+            t_col.cast("long").alias("event_time_sec"),
         ]
-        for v in value_cols:
+        for v in OPS_VALUE_COLS:
             cols.append(values.get(v, F.lit(0.0)).cast("double").alias(v))
         return df.select(*cols)
 
-    flag = lambda cond: F.when(cond, 1.0).otherwise(0.0)  # noqa: E731
-
-    # Departure known at actual departure time
     dep_events = _rows(
-        base,
-        F.col("_sched_sec") + F.col("DepDelay") * 60.0,
-        0,
+        base, "dep", F.col("_sched_sec") + F.col("DepDelay") * 60.0,
         dep_n=F.lit(1.0),
         del15_n=flag(F.col("DepDelay") > 15),
         dep_sum=F.col("DepDelay"),
-        # a late flight stops "waiting" when it departs
         waiting=F.when(F.col("DepDelay") > 0, -1.0).otherwise(0.0),
     )
-    # Delay causes known at actual arrival time
     arr_events = _rows(
-        base.filter(F.col("CRSElapsedTime").isNotNull()),
+        base.filter(F.col("CRSElapsedTime").isNotNull()), "arr",
         F.col("_sched_sec") + (F.col("CRSElapsedTime") + F.col("ArrDelay")) * 60.0,
-        0,
         nas_n=flag(F.col("NASDelay") > 0),
         nas_min=F.col("NASDelay"),
         wx_n=flag(F.col("WeatherDelay") > 0),
@@ -349,34 +354,57 @@ def _add_delay_cause_aggregates(flights) -> object:
         la_n=flag(F.col("LateAircraftDelay") > 0),
         la_min=F.col("LateAircraftDelay"),
     )
-    # A late flight starts "waiting" at its scheduled departure time
     wait_events = _rows(
-        base.filter(F.col("DepDelay") > 0), F.col("_sched_sec"), 0, waiting=F.lit(1.0),
+        base.filter(F.col("DepDelay") > 0), "wait", F.col("_sched_sec"),
+        waiting=F.lit(1.0),
     )
-    # One query row per flight at its own prediction time
-    query_rows = _rows(base, F.col("_t2_sec"), 1)
-
-    events = (
-        dep_events.unionByName(arr_events)
-        .unionByName(wait_events)
-        .unionByName(query_rows)
-        .filter(F.col("_t").isNotNull())
+    return (
+        dep_events.unionByName(arr_events).unionByName(wait_events)
+        .filter(F.col("event_time_sec").isNotNull())
     )
 
-    # Running sum of everything known at or before each row's time.
-    # A flight's own events all fall after its own T-2h, so it never
-    # counts itself.
+
+def same_day_airport_features(events, queries) -> object:
+    """
+    Compute the 11 same-day airport delay features for *queries*.
+
+    events  : rows from build_airport_ops_events (needs Origin, FlightDate,
+              event_time_sec, OPS_VALUE_COLS)
+    queries : one row per flight to score: flight_key, Origin, FlightDate,
+              query_time_sec (the prediction time T-2h, epoch seconds)
+
+    An event counts for a flight if it happened at the same Origin on the
+    same local FlightDate at or before the flight's query time. Each flight
+    has its own cut-off, so a single window frame cannot express it: event
+    rows and query rows are unioned and a running sum over time per
+    (Origin, FlightDate) is read off at the query rows. A flight's own events
+    all fall after its own T-2h, so it never counts itself.
+    """
+    ev = events.select(
+        "Origin", "FlightDate",
+        F.col("event_time_sec").cast("long").alias("_t"),
+        F.lit(0).alias("_is_query"),
+        F.lit(None).cast("long").alias("_qkey"),
+        *[F.col(v).cast("double").alias(v) for v in OPS_VALUE_COLS],
+    )
+    qr = queries.select(
+        "Origin", "FlightDate",
+        F.col("query_time_sec").cast("long").alias("_t"),
+        F.lit(1).alias("_is_query"),
+        F.col("flight_key").alias("_qkey"),
+        *[F.lit(0.0).alias(v) for v in OPS_VALUE_COLS],
+    )
     run_win = (
         Window.partitionBy("Origin", "FlightDate")
         .orderBy("_t")
         .rangeBetween(Window.unboundedPreceding, 0)
     )
-    known = events.select(
-        "_is_query", "_qkey",
-        *[F.sum(v).over(run_win).alias(v) for v in value_cols],
-    ).filter(F.col("_is_query") == 1)
-
-    aggregates = known.select(
+    known = (
+        ev.unionByName(qr)
+        .select("_is_query", "_qkey", *[F.sum(v).over(run_win).alias(v) for v in OPS_VALUE_COLS])
+        .filter(F.col("_is_query") == 1)
+    )
+    return known.select(
         F.col("_qkey").alias("flight_key"),
         F.col("nas_n").alias("airport_nas_delays_today"),
         F.col("nas_min").alias("airport_nas_delay_min_today"),
@@ -394,6 +422,26 @@ def _add_delay_cause_aggregates(flights) -> object:
         F.greatest(F.col("waiting"), F.lit(0.0)).alias("airport_waiting_late_now"),
     )
 
+
+def _add_delay_cause_aggregates(flights) -> object:
+    """
+    Same-day picture of delays at the origin airport, as known at the
+    prediction time T-2h (``t_minus_2_utc``) of each flight:
+
+    * departure delays count once a flight has ACTUALLY departed by T-2h
+      (delayed-flight count, average delay, delay rate);
+    * delay-cause minutes count once it has ACTUALLY landed by T-2h;
+    * ``airport_waiting_late_now``: flights past their scheduled departure
+      but not yet departed at T-2h.
+
+    See build_airport_ops_events() and same_day_airport_features().
+    """
+    events = build_airport_ops_events(flights)
+    queries = flights.select(
+        "flight_key", "Origin", "FlightDate",
+        F.col("t_minus_2_utc").cast("long").alias("query_time_sec"),
+    )
+    aggregates = same_day_airport_features(events, queries)
     result = flights.join(aggregates, on="flight_key", how="left").fillna(
         0.0, subset=[c for c in aggregates.columns if c != "flight_key"]
     )
@@ -408,14 +456,12 @@ def _add_delay_cause_aggregates(flights) -> object:
 # Storm event counts + holiday flags
 # ---------------------------------------------------------------------------
 
-def _add_contextual_features(spark: SparkSession, flights, paths: dict = PATHS) -> object:
+def add_storm_features(spark: SparkSession, flights, paths: dict = PATHS) -> object:
     """
-    Add storm-event counts (6h / 24h windows) and holiday flags.
-
-    Storm events: counts of storms near the origin that began in the 6 h /
-    24 h before the prediction time (T-2h), from the storm_events Parquet.
-    Holidays: loaded from the holidays JSON and broadcast-joined.
-    Both gracefully fall back to zeros if the data files are missing.
+    Add storm_events_6h / storm_events_24h: storms near the origin that began
+    in [T-8h, T-2h] / [T-26h, T-2h], where T-2h is ``t_minus_2_utc``.
+    Needs columns flight_key, Origin, t_minus_2_utc. Zeros if the
+    storm_events Parquet is missing. Also used by the streaming pipeline.
     """
     # ── Storm events ─────────────────────────────────────────────────────
     storm_path = paths["processed"] / f"storm_events_{YEAR}.parquet"
@@ -481,6 +527,15 @@ def _add_contextual_features(spark: SparkSession, flights, paths: dict = PATHS) 
             .withColumn("storm_events_6h",  F.lit(0.0))
         )
 
+    return flights
+
+
+def add_holiday_features(flights, paths: dict = PATHS) -> object:
+    """
+    Add is_holiday / is_holiday_adjacent (within one day of a US holiday)
+    from the holidays JSON, using FlightDate. Zeros if the file is missing.
+    Also used by the streaming pipeline.
+    """
     # ── Holidays ─────────────────────────────────────────────────────────
     holidays_path = paths["processed"] / f"us_holidays_{YEAR}.json"
     if holidays_path.exists():
@@ -522,6 +577,12 @@ def _add_contextual_features(spark: SparkSession, flights, paths: dict = PATHS) 
         )
 
     return flights
+
+
+def _add_contextual_features(spark: SparkSession, flights, paths: dict = PATHS) -> object:
+    """Add storm-event counts and holiday flags (see the two functions above)."""
+    flights = add_storm_features(spark, flights, paths=paths)
+    return add_holiday_features(flights, paths=paths)
 
 
 # ---------------------------------------------------------------------------
@@ -644,7 +705,10 @@ def save_feature_sets(
             ("full",        full_feature_cols),
         ]:
             out_dir = paths["features"] / f"{task}_{variant}"
-            meta = ["flight_key", "FlightDate", "data_split", raw_tgt, log_tgt, cls_tgt]
+            # scheduled_departure_utc is kept so the Kafka producer can replay
+            # flights at their real UTC times (not a model input).
+            meta = ["flight_key", "FlightDate", "scheduled_departure_utc", "data_split",
+                    raw_tgt, log_tgt, cls_tgt]
             ds = features_df.select(
                 *list(dict.fromkeys(meta + p_cols))
             ).filter(F.col("data_split").isNotNull())
@@ -679,5 +743,17 @@ def run_feature_engineering(
     features_df = features_df.cache()
 
     save_feature_sets(features_df, paths=paths)
+
+    # Operational events (departures, arrivals, flights starting to wait)
+    # that the Kafka producer replays so the streaming pipeline can rebuild
+    # the same-day airport features live.
+    ops_dir = paths["features"] / "airport_ops_events"
+    (
+        build_airport_ops_events(features_df.filter(F.col("data_split").isNotNull()))
+        .write.mode("overwrite").partitionBy("data_split")
+        .option("compression", "snappy").parquet(str(ops_dir))
+    )
+    logger.info("Saved airport ops events: %s", ops_dir)
+
     features_df.unpersist()
     return features_df

@@ -12,6 +12,7 @@ Usage
     python main.py --steps produce           # replay BTS data into Kafka
     python main.py --steps produce --produce-rate 100   # 100 events/sec
     python main.py --steps produce --produce-limit 1000 # first 1000 rows
+    python main.py --steps produce --produce-split all  # replay all months (default: test)
 
 Steps (in order)
 ----------------
@@ -109,6 +110,13 @@ def _parse_args() -> argparse.Namespace:
         help="For --steps produce: max events published per second (default 50, 0=unlimited).",
     )
     parser.add_argument(
+        "--produce-split",
+        choices=["test", "validation", "train", "all"],
+        default="test",
+        help="For --steps produce: which flights to replay (default 'test' = Nov-Dec, "
+             "the months the models never trained on).",
+    )
+    parser.add_argument(
         "--produce-limit",
         type=int,
         default=0,
@@ -128,7 +136,8 @@ def _banner(title: str) -> None:
 # Pipeline
 # ---------------------------------------------------------------------------
 
-def _run(steps: list, kafka: bool, produce_rate: int, produce_limit: int) -> None:
+def _run(steps: list, kafka: bool, produce_rate: int, produce_limit: int,
+         produce_split: str = "test") -> None:
     bts_csv_files = None
     noaa_paths    = None
     storm_csv     = None
@@ -223,6 +232,7 @@ def _run(steps: list, kafka: bool, produce_rate: int, produce_limit: int) -> Non
             topic=KAFKA_FLIGHT_TOPIC,
             rate_per_sec=produce_rate,
             limit=produce_limit,
+            split=produce_split,
         )
 
     # ── Step 10: Structured Streaming ──────────────────────────────────────
@@ -250,6 +260,7 @@ def main() -> None:
             kafka=args.kafka,
             produce_rate=args.produce_rate,
             produce_limit=args.produce_limit,
+            produce_split=args.produce_split,
         )
     except SystemExit:
         raise
