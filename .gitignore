@@ -26,7 +26,7 @@ data/*
 logs/
 benchmarks_output/
 results/
-reports/*
+reports/
 
 
 

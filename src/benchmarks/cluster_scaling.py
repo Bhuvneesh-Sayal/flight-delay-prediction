@@ -227,10 +227,52 @@ def _plot_cluster_results(bench_df: pd.DataFrame, paths: dict) -> None:
         fontsize=12, fontweight="bold",
     )
     plt.tight_layout()
-    out = paths["benchmarks"] / "cluster_scaling_chart.png"
-    plt.savefig(out, dpi=150)
+    out = _safe_write(paths["benchmarks"] / "cluster_scaling_chart.png",
+                      lambda p: plt.savefig(p, dpi=150))
     plt.close(fig)
     logger.info("Cluster benchmark chart saved → %s", out)
+
+
+def _safe_write(dest: Path, writer, retries: int = 5) -> Path:
+    """
+    Write an output file through a local temp file, then copy it to *dest*.
+
+    The benchmark output folder is bind-mounted from a OneDrive directory; opening
+    an existing file there can fail with 'Errno 35 Resource deadlock avoided'
+    while OneDrive syncs it. The (slow) benchmark results must not be lost, so:
+    retry, then remove-and-recreate, then fall back to a timestamped name.
+    Returns the path actually written.
+    """
+    import shutil
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_file = Path(tmp) / dest.name
+        writer(tmp_file)
+
+        last_exc = None
+        for attempt in range(1, retries + 1):
+            try:
+                shutil.copyfile(tmp_file, dest)
+                return dest
+            except OSError as exc:
+                last_exc = exc
+                logger.warning("Writing %s failed (attempt %d/%d): %s",
+                               dest, attempt, retries, exc)
+                try:
+                    dest.unlink(missing_ok=True)   # recreate instead of overwrite
+                except OSError:
+                    pass
+                time.sleep(1.0 * attempt)
+
+        fallback = dest.with_name(f"{dest.stem}_{time.strftime('%Y%m%d_%H%M%S')}{dest.suffix}")
+        try:
+            shutil.copyfile(tmp_file, fallback)
+            logger.warning("Could not write %s (%s); saved as %s instead.",
+                           dest, last_exc, fallback)
+            return fallback
+        except OSError as exc:
+            raise OSError(f"Could not write {dest} or {fallback}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +342,8 @@ def run_cluster_benchmarks(
     spark.stop()
 
     bench_df = pd.DataFrame(results)
-    out_csv = paths["benchmarks"] / "cluster_scaling_results.csv"
-    bench_df.to_csv(out_csv, index=False)
+    out_csv = _safe_write(paths["benchmarks"] / "cluster_scaling_results.csv",
+                          lambda p: bench_df.to_csv(p, index=False))
     logger.info("Cluster benchmark results saved → %s", out_csv)
 
     _plot_cluster_results(bench_df, paths)

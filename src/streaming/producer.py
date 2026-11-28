@@ -74,7 +74,7 @@ def _to_epoch_seconds(series: pd.Series) -> pd.Series:
     return (ts - pd.Timestamp("1970-01-01")) // pd.Timedelta(seconds=1)
 
 
-def _load_flights(paths: dict, split: str, limit: int) -> pd.DataFrame:
+def _load_flights(paths: dict, split: str, limit: int, offset: int = 0) -> pd.DataFrame:
     for name in ("departure_full", "departure_bts_weather"):
         feature_path = paths["features"] / name
         if feature_path.exists():
@@ -84,7 +84,10 @@ def _load_flights(paths: dict, split: str, limit: int) -> pd.DataFrame:
             f"No feature set under {paths['features']}. Run '--steps prep features' first."
         )
     logger.info("Loading feature set from %s…", feature_path)
-    df = pd.read_parquet(feature_path)
+    # data_split is a Hive partition column, so this filter prunes whole
+    # directories instead of reading every split into memory.
+    filters = [("data_split", "==", split)] if split != "all" else None
+    df = pd.read_parquet(feature_path, filters=filters)
 
     # Replay only one data split (partition column -> regular column in pandas)
     if split != "all":
@@ -106,10 +109,12 @@ def _load_flights(paths: dict, split: str, limit: int) -> pd.DataFrame:
         df["sched_sec"] = (local - pd.Timestamp("1970-01-01")) // pd.Timedelta(seconds=1)
 
     df = df.sort_values(["sched_sec", "flight_key"]).reset_index(drop=True)
+    if offset > 0:
+        df = df.iloc[offset:]
     if limit > 0:
         df = df.head(limit)
-        logger.info("Limiting replay to first %d flights.", limit)
-    return df
+        logger.info("Limiting replay to %d flights (starting at #%d).", limit, offset)
+    return df.reset_index(drop=True)
 
 
 def _flight_messages(df: pd.DataFrame) -> list:
@@ -161,6 +166,24 @@ def _ops_messages(paths: dict, flight_keys: set) -> list:
     return msgs
 
 
+def build_replay_messages(
+    paths: dict = PATHS,
+    limit: int = 50,
+    offset: int = 0,
+    split: str = "test",
+) -> list:
+    """
+    Return *limit* flights (from flight #*offset* in scheduled order) plus their
+    airport ops events as a list of JSON-serialisable message dicts, ordered by
+    event time (ops before flights at the same second).  Used by the Streamlit
+    "batch streaming" tab; needs no Kafka or Spark.
+    """
+    flights = _load_flights(paths, split, limit, offset)
+    messages = _flight_messages(flights) + _ops_messages(paths, set(flights["flight_key"]))
+    messages.sort(key=lambda m: (m[0], m[1]))
+    return [m[2] for m in messages]
+
+
 def run_producer(
     paths: dict = PATHS,
     bootstrap_servers: str = KAFKA_BOOTSTRAP_SERVERS,
@@ -202,7 +225,6 @@ def run_producer(
             bootstrap_servers=bootstrap_servers,
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
             key_serializer=lambda k: str(k).encode("utf-8"),
-            api_version=(2, 5, 0),   # skip broker version negotiation
             batch_size=16384,
             linger_ms=10,
             retries=3,

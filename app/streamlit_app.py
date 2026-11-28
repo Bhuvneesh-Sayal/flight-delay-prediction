@@ -43,6 +43,7 @@ from config.settings import (
     KAFKA_SCORES_TOPIC,
     PATHS,
     TOP_10_AIRPORTS,
+    YEAR,
 )
 
 # ---------------------------------------------------------------------------
@@ -87,7 +88,14 @@ AIRLINES = {
 # Both producer and consumer use kafka:9092 — resolves via /etc/hosts to 127.0.0.1
 # This matches what Kafka advertises internally so there's no reconnect confusion.
 _KAFKA_BOOTSTRAP = "kafka:9092"
-_KAFKA_API_VER   = (2, 5, 0)   # skip broker version negotiation
+# None = let kafka-python auto-detect the broker version. A pinned api_version
+# made the producer time out waiting for metadata on kafka:9092.
+_KAFKA_API_VER   = None
+
+# Dates the model has data for (training year only)
+_MIN_DATE     = date(YEAR, 1, 1)
+_MAX_DATE     = date(YEAR, 12, 31)
+_DEFAULT_DATE = date(YEAR, 11, 15)   # inside the held-out test period (Nov–Dec)
 
 
 # ---------------------------------------------------------------------------
@@ -301,16 +309,19 @@ def _render_flight_form(key_prefix: str):
 
     c4, c5 = st.columns(2)
     with c4:
-        flight_date = st.date_input("Departure Date", value=date.today(),
-                                    min_value=date(2024, 1, 1), max_value=date(2026, 12, 31),
-                                    key=f"{key_prefix}_date")
+        # The models were trained on 2025 flights only (and the streaming weather
+        # table covers 2025 only), so other dates are out of range.
+        flight_date = st.date_input("Departure Date", value=_DEFAULT_DATE,
+                                    min_value=_MIN_DATE, max_value=_MAX_DATE,
+                                    key=f"{key_prefix}_date",
+                                    help="Model trained on flights from 1 Jan – 31 Dec 2025.")
     with c5:
         dep_time = st.time_input("Scheduled Departure Time", value=dtime(8, 0),
                                  step=900, key=f"{key_prefix}_time")
 
     c6, c7 = st.columns(2)
     with c6:
-        elapsed_time = st.number_input("Flight Duration (min)", 60, 600, 180,
+        elapsed_time = st.number_input("Flight Duration (min)", 60, 420, 180,
                                        step=5, key=f"{key_prefix}_dur")
     with c7:
         prev_delayed = st.checkbox("Previous aircraft leg was delayed",
@@ -484,6 +495,169 @@ def render_kafka_tab():
 
 
 # ---------------------------------------------------------------------------
+# Tab 3 — Batch streaming (live feed of many flights)
+# ---------------------------------------------------------------------------
+_BATCH_MAX_FLIGHTS = 300      # upper bound keeps the live table readable
+_BATCH_TIMEOUT_SECS = 180     # give up waiting for scores after this long
+
+
+@st.cache_data(show_spinner="Loading flights to replay…")
+def _load_replay_messages(n_flights: int, offset: int) -> list:
+    from src.streaming.producer import build_replay_messages
+    return build_replay_messages(PATHS, limit=n_flights, offset=offset, split="test")
+
+
+def _render_batch_progress(slots, n_flights, n_msgs, sent, results):
+    """Redraw the live widgets from the scores received so far."""
+    scored = len(results)
+    slots["bar"].progress(min(scored / n_flights, 1.0),
+                          text=f"Scored {scored} / {n_flights} flights "
+                               f"(sent {sent} / {n_msgs} messages)")
+    if not results:
+        return
+    df = pd.DataFrame(list(results.values()))
+    with slots["metrics"].container():
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Flights scored", scored)
+        m2.metric("Avg P(delayed)", f"{df['p_delayed'].mean():.1%}")
+        m3.metric("Avg expected delay", f"{df['expected_delay'].mean():.1f} min")
+        m4.metric("High risk (P > 50%)", int((df["p_delayed"] > 0.5).sum()))
+    slots["chart"].line_chart(
+        df.reset_index(drop=True)[["p_delayed"]].rename(columns={"p_delayed": "P(delayed)"}),
+        height=220,
+    )
+    cols = [c for c in ["FlightDate", "Origin", "Dest", "Reporting_Airline",
+                        "scheduled_departure_utc", "p_delayed", "expected_delay",
+                        "scored_at"] if c in df.columns]
+    slots["table"].dataframe(
+        df[cols].iloc[::-1],   # newest first
+        use_container_width=True, hide_index=True,
+        column_config={
+            "p_delayed": st.column_config.ProgressColumn(
+                "P(delayed)", min_value=0.0, max_value=1.0, format="%.2f"),
+            "expected_delay": st.column_config.NumberColumn("Expected delay (min)",
+                                                            format="%.1f"),
+        },
+    )
+
+
+def render_batch_tab():
+    st.subheader("🌊 Batch Streaming — live feed")
+    st.caption(
+        "Replays real Nov–Dec 2025 flights (never seen in training) into **`flight-events`**. "
+        "Spark Structured Streaming scores each micro-batch and the results appear below "
+        "as they arrive on **`delay-predictions`**."
+    )
+
+    if not _kafka_available():
+        st.error(
+            "❌ Cannot connect to Kafka at `kafka:9092`.  \n"
+            "Start it with `docker compose up -d` and make sure `127.0.0.1 kafka` is in `/etc/hosts`."
+        )
+        return
+    st.success("✅ Kafka is reachable")
+    st.info(
+        "The scoring pipeline must be running in another terminal:  \n"
+        "```\nexport JAVA_HOME=$(/usr/libexec/java_home -v 17)\n"
+        "export KAFKA_BOOTSTRAP_SERVERS=kafka:9092\n"
+        "python main.py --steps stream --kafka\n```"
+    )
+
+    c1, c2, c3 = st.columns(3)
+    n_flights = c1.slider("Flights to stream", 10, _BATCH_MAX_FLIGHTS, 50, step=10, key="t3_n")
+    offset = c2.number_input("Start at flight # (test split, by departure time)",
+                             min_value=0, max_value=1_000_000, value=0, step=100, key="t3_off")
+    rate = c3.slider("Messages per second", 5, 100, 20, step=5, key="t3_rate")
+
+    if not st.button("🌊 Start batch streaming", type="primary",
+                     use_container_width=True, key="t3_btn"):
+        return
+
+    try:
+        msgs = _load_replay_messages(int(n_flights), int(offset))
+    except FileNotFoundError as e:
+        st.error(str(e))
+        return
+    except Exception:
+        import logging as _l
+        _l.getLogger(__name__).exception("Loading replay flights failed")
+        st.error("Could not load flights to replay — check logs/pipeline.log for details.")
+        return
+
+    keys = {m["flight_key"] for m in msgs if m.get("event_type") == "flight"}
+    n_flights_real = len(keys)
+    if n_flights_real == 0:
+        st.warning("No flights found at that offset — lower the start number.")
+        return
+    n_ops = len(msgs) - n_flights_real
+    st.caption(f"Streaming {n_flights_real} flights + {n_ops} airport operational events.")
+
+    slots = {k: st.empty() for k in ("bar", "metrics", "chart", "table")}
+    results: dict = {}   # flight_key -> score message
+
+    # The consumer must exist (and be at the end of the topic) before anything is published.
+    consumer = _create_result_consumer()
+    if consumer is None:
+        st.error("Could not connect to the `delay-predictions` topic. Is Kafka running?")
+        return
+
+    producer = None
+    sent = 0
+    try:
+        from kafka import KafkaProducer
+        producer = KafkaProducer(
+            bootstrap_servers=_KAFKA_BOOTSTRAP,
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            key_serializer=lambda k: str(k).encode("utf-8"),
+            api_version=_KAFKA_API_VER,
+        )
+        start = time.monotonic()
+        deadline = start + _BATCH_TIMEOUT_SECS
+        _render_batch_progress(slots, n_flights_real, len(msgs), sent, results)
+
+        while time.monotonic() < deadline and len(results) < n_flights_real:
+            # publish whatever should have been sent by now at the chosen rate
+            due = min(len(msgs), int((time.monotonic() - start) * rate) + 1)
+            while sent < due:
+                m = msgs[sent]
+                producer.send(KAFKA_FLIGHT_TOPIC, key=m["flight_key"], value=m)
+                sent += 1
+            producer.flush()
+
+            # collect any scores that arrived (returns after <= 1 s)
+            polled = consumer.poll(timeout_ms=1000)
+            for records in polled.values():
+                for rec in records:
+                    v = rec.value
+                    fk = v.get("flight_key")
+                    if fk in keys and fk not in results:
+                        results[fk] = v
+            _render_batch_progress(slots, n_flights_real, len(msgs), sent, results)
+    except Exception as e:
+        import logging as _l
+        _l.getLogger(__name__).exception("Batch streaming failed")
+        st.error(f"Batch streaming failed: {e}")
+        return
+    finally:
+        try:
+            if producer is not None:
+                producer.flush()
+                producer.close()
+        finally:
+            consumer.close()
+
+    if len(results) >= n_flights_real:
+        st.success(f"✅ All {n_flights_real} flights scored in "
+                   f"{time.monotonic() - start:.0f} s.")
+    else:
+        st.warning(
+            f"Timed out: {len(results)} / {n_flights_real} flights scored after "
+            f"{_BATCH_TIMEOUT_SECS} s. Check that the streaming pipeline is running "
+            "(`python main.py --steps stream --kafka`)."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -493,7 +667,8 @@ def main():
         "Trained on 2025 US domestic flights (10 hub airports)"
     )
 
-    tab1, tab2 = st.tabs(["🔮 Instant Prediction", "📡 Real-time via Kafka"])
+    tab1, tab2, tab3 = st.tabs(["🔮 Instant Prediction", "📡 Real-time via Kafka",
+                                "🌊 Batch Streaming"])
 
     with tab1:
         spark, clf_model, reg_model = load_models()
@@ -504,6 +679,9 @@ def main():
 
     with tab2:
         render_kafka_tab()
+
+    with tab3:
+        render_batch_tab()
 
 
 if __name__ == "__main__":

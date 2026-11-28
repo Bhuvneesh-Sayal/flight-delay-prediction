@@ -126,10 +126,7 @@ def _ensure_kafka_topics(topics: list, partitions: int = 3) -> None:
         logger.warning("kafka-python not installed — cannot pre-create topics %s.", topics)
         return
 
-    admin = KafkaAdminClient(
-        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-        api_version=(2, 5, 0),   # skip broker version negotiation, as the producer does
-    )
+    admin = KafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
     try:
         missing = [t for t in topics if t not in set(admin.list_topics())]
         for topic in missing:
@@ -300,7 +297,12 @@ def _make_batch_processor(
     def _process(batch_df: DataFrame, batch_id: int) -> None:
         is_ops = F.col("event_type") == "ops"
         ops = batch_df.filter(is_ops)
-        flights = batch_df.filter(F.col("event_type").isNull() | ~is_ops)
+        # Only well-formed flight messages are scored; anything else on the topic
+        # (unknown event types, JSON that failed to parse) is ignored.
+        flights = batch_df.filter(
+            (F.col("event_type").isNull() | (F.col("event_type") == "flight"))
+            & F.col("flight_key").isNotNull()
+        )
         n_ops, n_flights = ops.count(), flights.count()
         if n_ops == 0 and n_flights == 0:
             logger.debug("Batch %d is empty — skipping.", batch_id)
